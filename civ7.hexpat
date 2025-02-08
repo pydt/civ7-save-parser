@@ -102,6 +102,9 @@ struct civ7_struct {
     u32 len4;
     civ7_chunk chunks_4[len4];
     
+    u32 len5;
+    civ7_chunk chunks_5[len5];
+    
 };
 
 civ7_struct civ7 @ 0x00;
