@@ -14,6 +14,10 @@ struct civ7_chunk {
     u32 marker;
     u64 type;
     
+    if (type == 1) {
+        u32 unknown[3];
+    }
+    
     if (type == 2) {
       // utf-8 string
       u16 len;
@@ -33,6 +37,10 @@ struct civ7_chunk {
         char16 str_data[len];
     }
     
+    if (type == 8) {
+        u32 unknown[3];
+    }
+    
     if (type == 9) {
         u32 unknown[3];
     }
@@ -45,10 +53,23 @@ struct civ7_chunk {
         u32 unknown[4];
     }
     
+    if (type == 12) {
+        u32 unknown[3];
+    }
+    
+    if (type == 17) {
+        u32 unknown[4];
+    }
+    
+    if (type == 29) {
+        u32 wat[2];
+        u32 len;
+        civ7_chunk chunks[len];
+    }
+    
     if (type == 30) {
         // start array?
-        u32 wat1;
-        u32 wat2;
+        u32 wat[2];
         u32 len;
         array_chunk chunks[len];
     }
@@ -58,14 +79,29 @@ struct civ7_chunk {
         u32 len;
         u8 data[len];
     }
+    
+    std::assert(type <= 32, "Bad type");
 };
 
 struct civ7_struct {
     char header[4];
     std::assert(header == "CIV7", "Invalid header!");
     u32 wat1;
-    u32 wat2;
-    civ7_chunk chunk[while($ < 10000)];
+    u32 len;
+    civ7_chunk chunks_1[len];
+    
+    u32 wat2 [2];
+    u32 len2;
+    civ7_chunk chunks_2[len2];
+    
+    u32 wat3;
+    u32 len3;
+    civ7_chunk chunks_3[len3];
+    
+    u32 wat4[4];
+    u32 len4;
+    civ7_chunk chunks_4[len4];
+    
 };
 
 civ7_struct civ7 @ 0x00;
