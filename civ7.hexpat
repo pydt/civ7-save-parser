@@ -38,19 +38,28 @@ struct civ7_chunk {
     }
     
     if (type == 8) {
-        u32 unknown[3];
+        // 32 bit number
+        u32 len; // should always be 1?
+        u32 unknown;
+        u32 data[len];
     }
     
     if (type == 9) {
-        u32 unknown[3];
+        u16 len;
+        u16 unknown[3];
+        u32 data[len];
     }
     
     if (type == 10) {
-        u32 unknown[4];
+        u32 len;
+        u32 unknown;
+        u64 data[len];
     }
     
     if (type == 11) {
-        u32 unknown[4];
+        u32 len;
+        u32 unknown;
+        u64 data[len];
     }
     
     if (type == 12) {
@@ -58,7 +67,9 @@ struct civ7_chunk {
     }
     
     if (type == 17) {
-        u32 unknown[4];
+        u16 len;
+        u16 unknown[3];
+        u64 unknown[len];
     }
     
     if (type == 29) {

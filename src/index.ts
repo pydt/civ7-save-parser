@@ -1,8 +1,9 @@
-import { readFileSync } from "fs";
-import minimist from "minimist";
+import { readFileSync } from 'fs';
+import minimist from 'minimist';
 
 export const GAME_DATA_MARKERS = {
   GAME_TURN: Buffer.from([0x9d, 0x2c, 0xe6, 0xbd]),
+  GAME_AGE: Buffer.from([0x84, 0x84, 0xc6, 0xd0])
 };
 
 export enum ChunkType {
@@ -17,7 +18,7 @@ export enum ChunkType {
   Unknown_17 = 17,
   ChunkArray = 29,
   NestedArray = 30,
-  Unknown_32 = 32,
+  Unknown_32 = 32
 }
 
 export type Civ7Chunk = {
@@ -56,8 +57,8 @@ export type Civ7Chunk = {
 );
 
 export const parse = (data: Buffer) => {
-  if (data.subarray(0, 4).toString() !== "CIV7") {
-    throw new Error("Not a CIV 7 save file!");
+  if (data.subarray(0, 4).toString() !== 'CIV7') {
+    throw new Error('Not a CIV 7 save file!');
   }
 
   const allChunks: Civ7Chunk[] = [];
@@ -83,18 +84,11 @@ export const parse = (data: Buffer) => {
   return allChunks;
 };
 
-export const readNChunks = (
-  data: Buffer,
-  offset: number,
-  numChunks: number,
-) => {
+export const readNChunks = (data: Buffer, offset: number, numChunks: number) => {
   const chunks = [];
 
   for (let i = 0; i < numChunks; i++) {
-    const result = parseChunk(
-      data,
-      chunks[chunks.length - 1]?.endOffset || offset,
-    );
+    const result = parseChunk(data, chunks[chunks.length - 1]?.endOffset || offset);
     chunks.push(result);
   }
 
@@ -109,7 +103,6 @@ export const parseChunk = (data: Buffer, offset: number): Civ7Chunk => {
 
   switch (type) {
     case ChunkType.Unknown_1:
-    case ChunkType.Unknown_9:
     case ChunkType.Unknown_12: {
       // unknown 12 byte data
       const endOffset = dataStartOffset + 12;
@@ -120,15 +113,14 @@ export const parseChunk = (data: Buffer, offset: number): Civ7Chunk => {
         endOffset,
         marker,
         type,
-        value: data.subarray(dataStartOffset, endOffset),
+        value: data.subarray(dataStartOffset, endOffset)
       };
     }
 
-    case ChunkType.Unknown_10:
-    case ChunkType.Unknown_11:
-    case ChunkType.Unknown_17: {
-      // unknown 16 byte data
-      const endOffset = dataStartOffset + 16;
+    case ChunkType.Unknown_9: {
+      // unknown variable length 32 bit data?
+      const len = data.readUint16LE(dataStartOffset);
+      const endOffset = dataStartOffset + 8 + len * 4;
 
       return {
         offset,
@@ -136,7 +128,24 @@ export const parseChunk = (data: Buffer, offset: number): Civ7Chunk => {
         endOffset,
         marker,
         type,
-        value: data.subarray(dataStartOffset, endOffset),
+        value: data.subarray(dataStartOffset + 8, endOffset)
+      };
+    }
+
+    case ChunkType.Unknown_10:
+    case ChunkType.Unknown_11:
+    case ChunkType.Unknown_17: {
+      // unknown variable length 64 bit data?
+      const len = data.readUInt16LE(dataStartOffset);
+      const endOffset = dataStartOffset + 8 + len * 8;
+
+      return {
+        offset,
+        dataStartOffset,
+        endOffset,
+        marker,
+        type,
+        value: data.subarray(dataStartOffset + 4, endOffset)
       };
     }
 
@@ -147,7 +156,7 @@ export const parseChunk = (data: Buffer, offset: number): Civ7Chunk => {
         endOffset: dataStartOffset + 12,
         marker,
         type,
-        value: data.readUint32LE(dataStartOffset + 8),
+        value: data.readUint32LE(dataStartOffset + 8)
       };
     }
 
@@ -161,9 +170,7 @@ export const parseChunk = (data: Buffer, offset: number): Civ7Chunk => {
         endOffset,
         marker,
         type,
-        value: data
-          .subarray(dataStartOffset + 8, endOffset - 1)
-          .toString("utf-8"),
+        value: data.subarray(dataStartOffset + 8, endOffset - 1).toString('utf-8')
       };
     }
 
@@ -177,9 +184,7 @@ export const parseChunk = (data: Buffer, offset: number): Civ7Chunk => {
         endOffset,
         marker,
         type,
-        value: data
-          .subarray(dataStartOffset + 8, endOffset - 2)
-          .toString("utf16le"),
+        value: data.subarray(dataStartOffset + 8, endOffset - 2).toString('utf16le')
       };
     }
 
@@ -190,11 +195,10 @@ export const parseChunk = (data: Buffer, offset: number): Civ7Chunk => {
       return {
         offset,
         dataStartOffset,
-        endOffset:
-          subChunks[subChunks.length - 1]?.endOffset || dataStartOffset + 12,
+        endOffset: subChunks[subChunks.length - 1]?.endOffset || dataStartOffset + 12,
         marker,
         type,
-        value: subChunks,
+        value: subChunks
       };
     }
 
@@ -216,7 +220,7 @@ export const parseChunk = (data: Buffer, offset: number): Civ7Chunk => {
         endOffset,
         marker,
         type,
-        value: result,
+        value: result
       };
     }
 
@@ -231,7 +235,7 @@ export const parseChunk = (data: Buffer, offset: number): Civ7Chunk => {
         endOffset,
         marker,
         type,
-        value: data.subarray(dataStartOffset + 8, endOffset),
+        value: data.subarray(dataStartOffset + 8, endOffset)
       };
   }
 
@@ -244,7 +248,7 @@ type SimplifyResult = {
 };
 
 export const simplify = (chunks: Civ7Chunk[]): SimplifyResult[] => {
-  return chunks.flatMap<SimplifyResult>((c) => {
+  return chunks.flatMap<SimplifyResult>(c => {
     switch (c.type) {
       case ChunkType.Utf8String:
       case ChunkType.Utf16String:
@@ -252,31 +256,31 @@ export const simplify = (chunks: Civ7Chunk[]): SimplifyResult[] => {
         return [
           {
             marker: c.marker,
-            value: c.value,
-          },
+            value: c.value
+          }
         ];
 
       case ChunkType.NestedArray:
-        const value = c.value.map((x) => simplify(x));
+        const value = c.value.map(x => simplify(x));
 
-        return value.some((x) => x.length)
+        return value.some(x => x.length)
           ? [
               {
                 marker: c.marker,
-                value,
-              },
+                value
+              }
             ]
           : [];
 
       case ChunkType.ChunkArray: {
         const value = simplify(c.value);
 
-        return value.some((x) => typeof x.value === "number" || x.value?.length)
+        return value.some(x => typeof x.value === 'number' || x.value?.length)
           ? [
               {
                 marker: c.marker,
-                value,
-              },
+                value
+              }
             ]
           : [];
       }
@@ -291,7 +295,7 @@ if (require.main === module) {
   const argv = minimist(process.argv.slice(2));
 
   if (!argv._.length) {
-    console.log("Please pass the filename as the argument to the script.");
+    console.log('Please pass the filename as the argument to the script.');
   } else {
     const buffer = readFileSync(argv._[0]);
     const result = parse(buffer);
