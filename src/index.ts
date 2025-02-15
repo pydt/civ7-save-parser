@@ -3,7 +3,9 @@ import minimist from 'minimist';
 
 export const GAME_DATA_MARKERS = {
   GAME_TURN: Buffer.from([0x9d, 0x2c, 0xe6, 0xbd]),
-  GAME_AGE: Buffer.from([0x84, 0x84, 0xc6, 0xd0])
+  GAME_AGE: Buffer.from([0x84, 0x84, 0xc6, 0xd0]),
+  LEADER_NAME: Buffer.from([0x0f, 0xfb, 0x8c, 0xc1]),
+  CIV_NAME: Buffer.from([0x76, 0x97, 0x40, 0xde])
 };
 
 export enum ChunkType {
@@ -57,34 +59,76 @@ export type Civ7Chunk = {
 );
 
 export const parse = (data: Buffer) => {
+  const chunks = parseRaw(data);
+  return parseChunks(chunks);
+};
+
+export const parseChunks = (data: RawChunkData) => {
+  return {
+    turn: data.group1.find(x => x.marker.equals(GAME_DATA_MARKERS.GAME_TURN)),
+    age: data.group1.find(x => x.marker.equals(GAME_DATA_MARKERS.GAME_AGE)),
+    players: data.group3.flatMap(x => {
+      if (x.type === ChunkType.ChunkArray) {
+        const leader = x.value.find(y => y.marker.equals(GAME_DATA_MARKERS.LEADER_NAME) && y.value);
+        const civ = x.value.find(y => y.marker.equals(GAME_DATA_MARKERS.CIV_NAME) && y.value);
+
+        if (leader && civ) {
+          return [
+            {
+              leader,
+              civ
+            }
+          ];
+        }
+      }
+
+      return [];
+    }),
+    rawData: data
+  };
+};
+
+export type RawChunkData = {
+  group1: Civ7Chunk[];
+  group2: Civ7Chunk[];
+  group3: Civ7Chunk[];
+  group4: Civ7Chunk[];
+  group5: Civ7Chunk[];
+};
+
+export const parseRaw = (data: Buffer): RawChunkData => {
   if (data.subarray(0, 4).toString() !== 'CIV7') {
     throw new Error('Not a CIV 7 save file!');
   }
 
-  const allChunks: Civ7Chunk[] = [];
-
-  const lastEndOffset = () => allChunks[allChunks.length - 1].endOffset;
+  const lastEndOffset = (chunks: Civ7Chunk[]) => chunks[chunks.length - 1].endOffset;
 
   // There has to be some pattern to the root data but I haven't figured it out yet
   const group1Len = data.readUint32LE(8);
-  allChunks.push(...readNChunks(data, 12, group1Len));
+  const group1 = readNChunks(data, 12, group1Len);
 
-  const group2Len = data.readUint32LE(lastEndOffset() + 8);
-  allChunks.push(...readNChunks(data, lastEndOffset() + 12, group2Len));
+  const group2Len = data.readUint32LE(lastEndOffset(group1) + 8);
+  const group2 = readNChunks(data, lastEndOffset(group1) + 12, group2Len);
 
-  const group3Len = data.readUint32LE(lastEndOffset() + 4);
-  allChunks.push(...readNChunks(data, lastEndOffset() + 8, group3Len));
+  const group3Len = data.readUint32LE(lastEndOffset(group2) + 4);
+  const group3 = readNChunks(data, lastEndOffset(group2) + 8, group3Len);
 
-  const group4Len = data.readUint32LE(lastEndOffset() + 16);
-  allChunks.push(...readNChunks(data, lastEndOffset() + 20, group4Len));
+  const group4Len = data.readUint32LE(lastEndOffset(group3) + 16);
+  const group4 = readNChunks(data, lastEndOffset(group3) + 20, group4Len);
 
-  const group5Len = data.readUint32LE(lastEndOffset());
-  allChunks.push(...readNChunks(data, lastEndOffset() + 4, group5Len));
+  const group5Len = data.readUint32LE(lastEndOffset(group4));
+  const group5 = readNChunks(data, lastEndOffset(group4) + 4, group5Len);
 
-  return allChunks;
+  return {
+    group1,
+    group2,
+    group3,
+    group4,
+    group5
+  };
 };
 
-export const readNChunks = (data: Buffer, offset: number, numChunks: number) => {
+export const readNChunks = (data: Buffer, offset: number, numChunks: number): Civ7Chunk[] => {
   const chunks = [];
 
   for (let i = 0; i < numChunks; i++) {
@@ -242,55 +286,6 @@ export const parseChunk = (data: Buffer, offset: number): Civ7Chunk => {
   throw new Error(`Could not parse chunk at offset ${offset}!`);
 };
 
-type SimplifyResult = {
-  marker: Buffer;
-  value: string | number | SimplifyResult[] | SimplifyResult[][];
-};
-
-export const simplify = (chunks: Civ7Chunk[]): SimplifyResult[] => {
-  return chunks.flatMap<SimplifyResult>(c => {
-    switch (c.type) {
-      case ChunkType.Utf8String:
-      case ChunkType.Utf16String:
-      case ChunkType.Number32:
-        return [
-          {
-            marker: c.marker,
-            value: c.value
-          }
-        ];
-
-      case ChunkType.NestedArray:
-        const value = c.value.map(x => simplify(x));
-
-        return value.some(x => x.length)
-          ? [
-              {
-                marker: c.marker,
-                value
-              }
-            ]
-          : [];
-
-      case ChunkType.ChunkArray: {
-        const value = simplify(c.value);
-
-        return value.some(x => typeof x.value === 'number' || x.value?.length)
-          ? [
-              {
-                marker: c.marker,
-                value
-              }
-            ]
-          : [];
-      }
-
-      default:
-        return [];
-    }
-  });
-};
-
 if (require.main === module) {
   const argv = minimist(process.argv.slice(2));
 
@@ -299,6 +294,6 @@ if (require.main === module) {
   } else {
     const buffer = readFileSync(argv._[0]);
     const result = parse(buffer);
-    console.log(JSON.stringify(simplify(result), null, 2));
+    console.log(JSON.stringify(result, null, 2));
   }
 }
