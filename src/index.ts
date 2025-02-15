@@ -294,6 +294,22 @@ if (require.main === module) {
   } else {
     const buffer = readFileSync(argv._[0]);
     const result = parse(buffer);
-    console.log(JSON.stringify(result, null, 2));
+    console.log(
+      JSON.stringify(
+        result,
+        (key, value) => {
+          if (value.value) {
+            return value.value;
+          }
+
+          if (key === 'rawData') {
+            return undefined;
+          }
+
+          return value;
+        },
+        2
+      )
+    );
   }
 }
