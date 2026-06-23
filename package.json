@@ -11,6 +11,8 @@
     "tsc": "tsc -p tsconfig.json && tsc -p tsconfig-cjs.json",
     "prepublishOnly": "npm run tsc",
     "start": "tsx src/index.ts",
+    "dump": "tsx tools/dump.ts",
+    "diff": "tsx tools/diff.ts",
     "lint-fix": "eslint --fix .",
     "test": "eslint . && jest"
   },

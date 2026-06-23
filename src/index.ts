@@ -5,8 +5,16 @@ export const GAME_DATA_MARKERS = {
   GAME_TURN: Buffer.from([0x9d, 0x2c, 0xe6, 0xbd]),
   GAME_AGE: Buffer.from([0x84, 0x84, 0xc6, 0xd0]),
   LEADER_NAME: Buffer.from([0x0f, 0xfb, 0x8c, 0xc1]),
-  CIV_NAME: Buffer.from([0x76, 0x97, 0x40, 0xde])
+  CIV_NAME: Buffer.from([0x76, 0x97, 0x40, 0xde]),
+  // Per-player actor type. Civ6 called this ACTOR_AI_HUMAN (marker 95b942ce);
+  // Civ7 renamed the marker but kept the value encoding: 3 = Human, 1 = AI.
+  PLAYER_TYPE: Buffer.from([0xd4, 0x5f, 0x83, 0x28])
 };
+
+export enum PlayerType {
+  AI = 1,
+  HUMAN = 3
+}
 
 export enum ChunkType {
   Unknown_1 = 1,
@@ -71,12 +79,15 @@ export const parseChunks = (data: RawChunkData) => {
       if (x.type === ChunkType.ChunkArray) {
         const leader = x.value.find(y => y.marker.equals(GAME_DATA_MARKERS.LEADER_NAME) && y.value);
         const civ = x.value.find(y => y.marker.equals(GAME_DATA_MARKERS.CIV_NAME) && y.value);
+        const playerType = x.value.find(y => y.marker.equals(GAME_DATA_MARKERS.PLAYER_TYPE));
 
         if (leader && civ) {
           return [
             {
               leader,
-              civ
+              civ,
+              playerType,
+              isHuman: playerType?.value === PlayerType.HUMAN
             }
           ];
         }
@@ -92,8 +103,48 @@ export type RawChunkData = {
   group1: Civ7Chunk[];
   group2: Civ7Chunk[];
   group3: Civ7Chunk[];
+  /** Chunks that sit in the separator between group3 and group4. Empty in
+   * single-player saves; non-empty in hotseat/multiplayer saves. */
+  interstitial34: Civ7Chunk[];
   group4: Civ7Chunk[];
   group5: Civ7Chunk[];
+};
+
+const lastEndOffset = (chunks: Civ7Chunk[], fallback: number) =>
+  chunks.length ? chunks[chunks.length - 1].endOffset : fallback;
+
+/**
+ * The separator between group3 and group4 is self-describing:
+ *   [u32 a=1][u32 N][N chunks][u32][u32][u32 groupLen][group chunks...]
+ * N is 0 in single-player saves and >0 in hotseat saves. Returns the
+ * interstitial chunks plus where the following group's data starts.
+ */
+const readVarSeparator = (data: Buffer, off: number) => {
+  const count = data.readUInt32LE(off + 4);
+  const interstitial = readNChunks(data, off + 8, count);
+  const afterChunks = lastEndOffset(interstitial, off + 8);
+  return {
+    interstitial,
+    groupLen: data.readUInt32LE(afterChunks + 8),
+    chunksAt: afterChunks + 12
+  };
+};
+
+/**
+ * The group4->group5 boundary is a simpler, variable-width header: zero or more
+ * small "count" words, then [u32 groupLen][first marker...]. A real marker is a
+ * 4-byte hash (>= 256) followed by a non-zero type word, so we scan forward for
+ * the first plausible marker and take the group length from the word before it.
+ */
+const findNextGroup = (data: Buffer, off: number) => {
+  for (let p = off; p < off + 64 && p + 8 <= data.length; p += 4) {
+    const maybeMarker = data.readUInt32LE(p);
+    const maybeType = data.readUInt32LE(p + 4);
+    if (maybeMarker >= 256 && maybeType > 0 && maybeType <= 32) {
+      return { groupLen: data.readUInt32LE(p - 4), chunksAt: p };
+    }
+  }
+  throw new Error(`Could not locate next group after offset ${off}`);
 };
 
 export const parseRaw = (data: Buffer): RawChunkData => {
@@ -101,28 +152,35 @@ export const parseRaw = (data: Buffer): RawChunkData => {
     throw new Error('Not a CIV 7 save file!');
   }
 
-  const lastEndOffset = (chunks: Civ7Chunk[]) => chunks[chunks.length - 1].endOffset;
+  const group1 = readNChunks(data, 12, data.readUint32LE(8));
+  let off = lastEndOffset(group1, 12);
 
-  // There has to be some pattern to the root data but I haven't figured it out yet
-  const group1Len = data.readUint32LE(8);
-  const group1 = readNChunks(data, 12, group1Len);
+  const group2 = readNChunks(data, off + 12, data.readUint32LE(off + 8));
+  off = lastEndOffset(group2, off);
 
-  const group2Len = data.readUint32LE(lastEndOffset(group1) + 8);
-  const group2 = readNChunks(data, lastEndOffset(group1) + 12, group2Len);
+  const group3 = readNChunks(data, off + 8, data.readUint32LE(off + 4));
+  off = lastEndOffset(group3, off);
 
-  const group3Len = data.readUint32LE(lastEndOffset(group2) + 4);
-  const group3 = readNChunks(data, lastEndOffset(group2) + 8, group3Len);
+  // group3 -> group4: variable separator carrying interstitial chunks
+  const sep = readVarSeparator(data, off);
+  const group4 = readNChunks(data, sep.chunksAt, sep.groupLen);
+  off = lastEndOffset(group4, sep.chunksAt);
 
-  const group4Len = data.readUint32LE(lastEndOffset(group3) + 16);
-  const group4 = readNChunks(data, lastEndOffset(group3) + 20, group4Len);
-
-  const group5Len = data.readUint32LE(lastEndOffset(group4));
-  const group5 = readNChunks(data, lastEndOffset(group4) + 4, group5Len);
+  // group4 -> group5 uses a different header; best-effort so a failure here
+  // never loses the player data in groups 1-3.
+  let group5: Civ7Chunk[] = [];
+  try {
+    const next = findNextGroup(data, off);
+    group5 = readNChunks(data, next.chunksAt, next.groupLen);
+  } catch {
+    group5 = [];
+  }
 
   return {
     group1,
     group2,
     group3,
+    interstitial34: sep.interstitial,
     group4,
     group5
   };

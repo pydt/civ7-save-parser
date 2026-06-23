@@ -51,5 +51,31 @@ describe('Parsing', () => {
 
     expect(result.players[5].civ.value).toBe('CIVILIZATION_MING');
     expect(result.players[5].leader.value).toBe('LEADER_JOSE_RIZAL');
+
+    // José Rizal is the only human in this single-player save
+    expect(result.players.filter(p => p.isHuman).map(p => p.leader.value)).toEqual([
+      'LEADER_JOSE_RIZAL'
+    ]);
+  });
+
+  it('parses a hotseat savegame (variable group separators) with 2 humans', () => {
+    const result = parse(readFileSync(join(__dirname, './AugustusAnt1.Civ7Save')));
+    expect(result.turn?.value).toBe(1);
+    expect(result.age?.value).toBe('AGE_ANTIQUITY');
+    expect(result.players.length).toBe(5);
+
+    expect(result.players.map(p => p.leader.value)).toEqual([
+      'LEADER_GENGHIS_KHAN',
+      'LEADER_IBN_BATTUTA',
+      'LEADER_AUGUSTUS',
+      'LEADER_FRIEDRICH',
+      'LEADER_LAKSHMIBAI'
+    ]);
+
+    // Augustus and Lakshmibai are the two human players (PLAYER_TYPE === 3)
+    expect(result.players.filter(p => p.isHuman).map(p => p.leader.value)).toEqual([
+      'LEADER_AUGUSTUS',
+      'LEADER_LAKSHMIBAI'
+    ]);
   });
 });
