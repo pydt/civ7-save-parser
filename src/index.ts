@@ -1,5 +1,44 @@
 import { readFileSync } from 'fs';
+import { inflateSync, constants } from 'zlib';
 import minimist from 'minimist';
+
+// The bulk game state (units, tiles, per-player data, whose turn it is) lives in
+// a compressed section after the uncompressed chunk groups. Framing matches Civ6:
+// a zlib stream split into length-prefixed blocks, i.e. a repeating
+// [u32 LE blockLen][blockLen bytes of deflate data]. The first block's length
+// prefix is 0x00010000 (65536) immediately followed by the zlib header (78 9c),
+// so COMPRESSED_DATA_START reliably locates the start. Concatenate the block
+// payloads (dropping the length prefixes) and inflate with Z_SYNC_FLUSH.
+// (Approach confirmed against the community tool iqqmuT/civ7-save-editor.)
+const COMPRESSED_DATA_START = Buffer.from([0x00, 0x00, 0x01, 0x00, 0x78, 0x9c]);
+
+/**
+ * Decompress the game-state blob from a Civ7 save. Returns ~7 MB of data that is
+ * largely (but not entirely) in the same marker+type chunk format as the header.
+ * Returns null if the save has no compressed section.
+ */
+export const decompress = (data: Buffer): Buffer | null => {
+  const start = data.indexOf(COMPRESSED_DATA_START);
+  if (start < 0) {
+    return null;
+  }
+
+  const blocks: Buffer[] = [];
+  let pos = start;
+  let blockLen = data.readUInt32LE(pos);
+  pos += 4;
+  while (blockLen > 1 && pos + blockLen <= data.length) {
+    blocks.push(data.subarray(pos, pos + blockLen));
+    pos += blockLen;
+    if (pos + 4 > data.length) {
+      break;
+    }
+    blockLen = data.readUInt32LE(pos);
+    pos += 4;
+  }
+
+  return inflateSync(Buffer.concat(blocks), { finishFlush: constants.Z_SYNC_FLUSH });
+};
 
 export const GAME_DATA_MARKERS = {
   GAME_TURN: Buffer.from([0x9d, 0x2c, 0xe6, 0xbd]),
@@ -8,7 +47,10 @@ export const GAME_DATA_MARKERS = {
   CIV_NAME: Buffer.from([0x76, 0x97, 0x40, 0xde]),
   // Per-player actor type. Civ6 called this ACTOR_AI_HUMAN (marker 95b942ce);
   // Civ7 renamed the marker but kept the value encoding: 3 = Human, 1 = AI.
-  PLAYER_TYPE: Buffer.from([0xd4, 0x5f, 0x83, 0x28])
+  PLAYER_TYPE: Buffer.from([0xd4, 0x5f, 0x83, 0x28]),
+  // Per-player id, matching the in-game player id / localPlayerID space.
+  // Confirmed: Lakshmibai=0, Augustus=1, Franklin=2.
+  PLAYER_ID: Buffer.from([0xde, 0xf6, 0x2d, 0x9b])
 };
 
 export enum PlayerType {
@@ -80,13 +122,19 @@ export const parseChunks = (data: RawChunkData) => {
         const leader = x.value.find(y => y.marker.equals(GAME_DATA_MARKERS.LEADER_NAME) && y.value);
         const civ = x.value.find(y => y.marker.equals(GAME_DATA_MARKERS.CIV_NAME) && y.value);
         const playerType = x.value.find(y => y.marker.equals(GAME_DATA_MARKERS.PLAYER_TYPE));
+        const playerId = x.value.find(y => y.marker.equals(GAME_DATA_MARKERS.PLAYER_ID));
 
         if (leader && civ) {
+          // PLAYER_ID matches the in-game player id / localPlayerID space
+          // (confirmed: Lakshmibai=0, Augustus=1, Franklin=2). Whose turn it is
+          // (localPlayerID) is NOT in the uncompressed data — see REVERSING.md.
+          const id = typeof playerId?.value === 'number' ? playerId.value : undefined;
           return [
             {
               leader,
               civ,
               playerType,
+              id,
               isHuman: playerType?.value === PlayerType.HUMAN
             }
           ];

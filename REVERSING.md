@@ -70,34 +70,135 @@ fixed-offset code couldn't handle. `parseRaw` now:
 - locates group5 by scanning for the first real marker
 - never throws on the later groups, so groups 1–3 (the player data) always parse
 
-## Current player / whose turn — NOT in the uncompressed data
+## Current player / whose turn — it's a per-player flag, ONLY in the compressed data
 
-Diffing the two hotseat saves (turn 1 vs turn 2) shows that **the entire
-uncompressed region is static configuration**. The only uncompressed changes
-between turns are: `GAME_TURN`, `GAME_DATE`, `SAVE_NAME`/`SAVE_TIMESTAMP`, and a
-per-actor flag (`0eed6e29`) that flips `0→1` on city-states/minor powers. The
-group3 AND group6 player records are byte-identical across the two turns. There
-is **no current-player scalar or per-actor turn bool** anywhere in groups 1–6.
+**Conclusion: whose-turn is the per-player `isTurnActive` boolean and it lives
+only in the compressed game state — it is NOT in the uncompressed data.**
 
-We only parse ~5–8% of the file. The rest is a **compressed game-state blob**
-(an `END_UNCOMPRESSED`-style `00 00 01 00` marker appears, mirroring Civ6's
-format). So whose-turn, unit positions, etc. live in compression — Civ7 moved
-into the compressed section what Civ6 kept in the clear (Civ6's `IS_CURRENT_TURN`
-was uncompressed). Note `0x789c` byte hits in the file are NOT valid zlib stream
-starts, so the exact framing still needs working out.
+Ground truth (in-game console, `GameContext.localPlayerID` + the player object's
+`isTurnActive`): the active player = `localPlayerID`. Confirmed: `LakshmibaiAnt2`
+→ 0 (Lakshmibai), `AugustusAnt2` → 1 (Augustus), `FranklinAnt1` → 2 (Franklin).
+Each player's `PLAYER_ID` (`def62d9b`) matches this id space, so the parser
+exposes `players[].id`.
 
-**Implication for PYDT:** reading turn #, roster, leaders/civs, and human/AI is
-done from the uncompressed groups. "Whose turn" would require decoding the
-compressed section — but recall the Civ6 handler never implemented
-`setCurrentTurnIndex` and PYDT tracks turn order in its own DB, so a first
-integration may not need it from the file at all. The harder open question is the
-**password-swap write path**, which also likely lives in the compressed region.
+**Decisive experiment (conclusive):** `FranklinAnt2` (Franklin id 2 active) vs
+`LafayetteAnt2` (Lafayette id 5 active) — same 6-player game, both round 2,
+different active players with high/distinct ids. The two files genuinely differ
+(2.06 MB vs 2.04 MB, diverging at 0x7e in the compressed region), but their
+**uncompressed structured data is byte-identical except the save timestamp and
+name — zero meaningful diffs.** So the active player is conclusively NOT in the
+uncompressed data.
 
-## Groups 4+ — still mostly unmapped
+Dead ends ruled out (every uncompressed candidate was a turn-1 counter or a 0/1
+flag that only matched because our multiplayer pairs used ids 0 and 1):
+- `af61f36a` (in game-session record `4d61e67c`): only ever reads 0 or 1, so it
+  cannot represent ids 2–5. `LafayetteAnt1` is id 5 but reads 1 — **disproven**;
+  the round-2 Lakshmibai(0)/Augustus(1) "matches" were coincidence.
+- `326673de` (Number32 at marker+24, in the group3→group4 separator): tracked the
+  active player in the *turn-1* Franklin(3)/Lafayette(6) pair (value and chunk
+  count both = player#), but it's a **turn-1 initialization counter** that maxes
+  out and stays there in later rounds (e.g. stuck at 6) — **disproven**.
+- A search of all uncompressed groups for a scalar reading the expected per-save
+  current id found nothing.
 
-Groups 4, 5, and the newly-found group6 (another 67-record actor section keyed by
-`959a8400`, same as group3) are parsed but largely unlabeled. They're static
-config, so lower priority than the compressed blob.
+So reading/writing `isTurnActive` requires the compressed game DB. The catch (see
+below): the live per-player records there are keyed by index, not a searchable
+hash, and sit in a region that shifts heavily between saves (the string-intern
+table), so positional/byte diffing fails. Locating the flag needs structural
+decode of the compressed player records — guided by the editor's marker-navigation
+(`PLAYER_SLOT_MARKERS` → `FXSBLKED` blocks) and in-game ground truth.
+
+**Pragmatic alternative for PYDT:** PYDT already tracks turn order in its own DB,
+and the uncompressed data gives turn #, roster, leader/civ, `PLAYER_ID`, and
+human/AI. `CivData.isCurrentTurn` could be *derived* from PYDT's known current
+player (`player.id === pydtCurrentPlayerId`) rather than read from the save —
+sidestepping the compressed decode entirely. The Civ6 handler only used
+`isCurrentTurn` to clean up stale flags for a turn-timer bug; whether Civ7 needs
+that write at all is an open question.
+
+### (Historical) the compressed game state
+
+Before finding `af61f36a`, the working theory was that whose-turn lived only in
+the compressed blob (the in-memory `Player.isTurnActive` does). The compressed
+decode work below is still useful for other fields (gold, influence, etc.) but is
+**not needed for `isCurrentTurn`** — that's a simple uncompressed read/write.
+
+### Decompression — SOLVED (`decompress()` in src/index.ts)
+
+The compressed game state is a zlib stream split into **length-prefixed blocks**:
+a repeating `[u32 LE blockLen][blockLen bytes of deflate data]`. The first block's
+length prefix is `00 00 01 00` (= 65536 = 64 KiB) immediately followed by the
+zlib header `78 9c`, so the 6-byte `COMPRESSED_DATA_START` (`00 00 01 00 78 9c`)
+locates the start. Read each block length, collect that many bytes, repeat until
+the length is ≤ 1; concat the block payloads (dropping the 4-byte prefixes) and
+`inflateSync` with `Z_SYNC_FLUSH`. AugustusAnt1's 1.45 MB → **7.04 MB** of game
+state. Re-compression is the inverse: `deflateSync` + `Z_SYNC_FLUSH`, then split
+into 64 KiB blocks each prefixed with its length. (Confirmed against the
+community tool — see below. My earlier "64 KiB + 4-byte gap" reading was the same
+bytes mis-described; the "gaps" are the length prefixes.)
+
+The decompressed blob is **largely the same marker+type chunk format** as the
+header — it opens with `GAME_GUID` (`d840e5f4`) + a type-2 string, and contains
+`LEADER_AUGUSTUS`, `Player`, `DIPLOMACY`, etc. BUT it is not a clean uniform
+stream: `parseChunk` walks the first 3 chunks then hits other record formats at
+offset 137 (e.g. `type=1024` = a `[hash][u16]` table), plus string-intern tables
+and packed arrays.
+
+**Positional byte-diff of the decompressed blobs does NOT work — even for a clean
+pair.** `LakshmibaiAnt2` (player 1 active, turn 2) vs `AugustusAnt2` (player 2
+active, turn 2, next save): decompressed 7.9 MB vs 9.2 MB, first ~147 KB
+identical, then **409k differing ranges**. Cause: a **string-interning table** of
+`LOC_ATTR_*` keys whose length differs between states, shifting every later
+offset. Must navigate by markers, not offsets.
+
+### Community tool: iqqmuT/civ7-save-editor (big accelerator)
+
+A JS save editor that edits player **gold** and **influence** by decompress →
+locate value → edit → recompress. It confirms our decompression and gives a
+proven **marker-navigation** technique for the body. Key constants (verbatim):
+
+- `COMPRESSED_DATA_START` = `00 00 01 00 78 9c`
+- `GOLD_MARKER` = `23 1e 99 37` · `INFLUENCE_MARKER` = `50 3c a8 4a`
+  (26 occurrences each in our hotseat body — one per player/city entity)
+- `FXSBLKED_MARKER` = ASCII `"FXSBLKED"` — a block barrier used to step from a
+  value marker to its data (`indexOf(GOLD) → indexOf(FXSBLKED) → +8 → value`)
+- `LEADER_MARKER` = `0f fb 8c c1` (same as our `players[].LEADER`)
+- **`PLAYER_SLOT_MARKERS`** (slots 1–8) = `b861f0f4, 2e51f783, d4ab9f19,
+  0230f96d, a1a59df3, 37959a84, 8dc4931d, 1bf4946a` — **these are exactly the
+  group3/group6 player-record ChunkArray keys**. So a player's group3 record
+  marker tells you their slot #, and the same marker keys their data in the body.
+  (In AugustusAnt1: Lakshmibai=slot1, Augustus=slot2, Ibn=slot4, Friedrich=slot5;
+  some players/city-states use markers outside this set of 8.)
+- Gold/influence are **24-bit**: read u32 LE, `>> 8`, `+1` if low byte is `0xFF`.
+
+Also from CivFanatics: the game's own modding API can dump state via
+`UI.setClipboardText()` as JSON when a save is loaded — a way to get **ground
+truth** (e.g. who the active player is) to then locate in the binary.
+
+### Status on `isCurrentTurn`
+
+Not yet located, but the path is now concrete and no longer requires decoding the
+whole DB: use marker-navigation (anchor on `PLAYER_SLOT_MARKERS` / per-player body
+markers, like the editor does for gold) to find a per-player current-turn flag.
+First gold-anchored window diff of the clean pair only showed treasury changing
+(`00→05`), so the flag isn't adjacent to gold — widen the per-player search, or
+use the in-game JSON dump to get ground truth and locate it directly.
+
+**Skipping players:** does NOT need `setCurrentTurnIndex` (Civ6 never implemented
+it). Most save handlers skip a player by setting their type to AI — which we can
+
+**Skipping players:** does NOT need `setCurrentTurnIndex` (Civ6 never implemented
+it). Most save handlers skip a player by setting their type to AI — which we can
+already do via `PLAYER_TYPE` (`d45f8328`) in the uncompressed group3 record. The
+write-back question (whether setting that uncompressed field alone is enough, or
+the compressed copy must also change) is open.
+
+## Groups 4+ (uncompressed) — still mostly unmapped
+
+Groups 4, 5, 6 (a second 67-record actor section keyed by `959a8400`), and the
+tiny groups 7–8 (keyed by `4ba04935`) are parsed but largely unlabeled. They're
+static config, so lower priority than the compressed blob. Uncompressed data ends
+at ~11% of the file; the rest is the compressed game state.
 
 ## Save corpus to capture (for differential analysis)
 

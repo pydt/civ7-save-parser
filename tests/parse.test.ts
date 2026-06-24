@@ -77,5 +77,9 @@ describe('Parsing', () => {
       'LEADER_AUGUSTUS',
       'LEADER_LAKSHMIBAI'
     ]);
+
+    // PLAYER_ID matches the in-game player id (localPlayerID space)
+    expect(result.players.find(p => p.leader.value === 'LEADER_LAKSHMIBAI')?.id).toBe(0);
+    expect(result.players.find(p => p.leader.value === 'LEADER_AUGUSTUS')?.id).toBe(1);
   });
 });

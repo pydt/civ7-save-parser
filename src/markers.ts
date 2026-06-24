@@ -234,6 +234,19 @@ export const MARKERS: Record<string, MarkerInfo> = {
   },
 
   // ---- group3: per-player records (ChunkArray) + misc ----
+  // game-session record (4d61e67c) — holds game name, version, ruleset, age, and:
+  af61f36a: {
+    name: 'unknown_af61f36a',
+    group: 'group3',
+    confidence: 'guess',
+    note: 'In the game-session record (4d61e67c). 12-byte [1][1][x]; 3rd word was 0/1 in the 2-player Lak/Aug pair and looked like the active-player index, but FranklinAnt1 (6 humans, Franklin id 2 active) reads 0 — DISPROVEN as current-player. Some other per-save counter.'
+  },
+  '4d61e67c': {
+    name: 'GAME_SESSION_RECORD',
+    group: 'group3',
+    confidence: 'likely',
+    note: 'ChunkArray holding game name, app version, ruleset, age, gamespeed, difficulty, session GUID, and CURRENT_PLAYER (af61f36a)'
+  },
   '90c46e00': {
     name: 'player.unknown_90c46e00',
     group: 'group3',
@@ -348,10 +361,10 @@ export const MARKERS: Record<string, MarkerInfo> = {
     note: 'type17, 12b'
   },
   def62d9b: {
-    name: 'player.unknown_def62d9b',
+    name: 'player.PLAYER_ID',
     group: 'group3',
-    confidence: 'guess',
-    note: 'number — varies per player (2, 12, 16...)'
+    confidence: 'known',
+    note: 'player id / 0-based turn-order index (Lakshmibai=0, Augustus=1...). Matches in-game localPlayerID. Used with CURRENT_PLAYER (af61f36a) to derive isCurrentTurn.'
   },
   '592439a2': {
     name: 'player.unknown_592439a2',
