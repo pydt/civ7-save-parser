@@ -117,8 +117,8 @@ export const MARKERS: Record<string, MarkerInfo> = {
   '5cae2784': {
     name: 'ENABLED_MODS',
     group: 'group1',
-    confidence: 'likely',
-    note: 'NestedArray of enabled mods/DLC/ages (base-standard, core, age-*, persona packs)'
+    confidence: 'known',
+    note: 'NestedArray of enabled mods/DLC/ages (base-standard, core, age-*, persona packs, and user mods like pydt-hotseat-limiter). Parsed by parseMods().'
   },
   '15879885': { name: 'unknown_15879885', group: 'group1', confidence: 'guess', note: 'type9' },
   bb5e3088: {
@@ -131,7 +131,7 @@ export const MARKERS: Record<string, MarkerInfo> = {
   '8cce874d': {
     name: 'mod.ENABLED',
     group: 'group1',
-    confidence: 'guess',
+    confidence: 'known',
     note: 'utf8 "1" enabled flag'
   },
   '2fd0a9d0': {
@@ -143,13 +143,13 @@ export const MARKERS: Record<string, MarkerInfo> = {
   '76612fe5': {
     name: 'mod.ID',
     group: 'group1',
-    confidence: 'likely',
-    note: 'mod/module id, e.g. age-exploration, base-standard, core'
+    confidence: 'known',
+    note: 'mod/module id, e.g. age-exploration, base-standard, core, pydt-hotseat-limiter'
   },
   '98260bea': {
     name: 'mod.DISPLAY_NAME',
     group: 'group1',
-    confidence: 'likely',
+    confidence: 'known',
     note: 'mod display name (sometimes localized json)'
   },
   '95dabc9d': {

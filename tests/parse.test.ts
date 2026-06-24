@@ -82,4 +82,21 @@ describe('Parsing', () => {
     expect(result.players.find(p => p.leader.value === 'LEADER_LAKSHMIBAI')?.id).toBe(0);
     expect(result.players.find(p => p.leader.value === 'LEADER_AUGUSTUS')?.id).toBe(1);
   });
+
+  it('detects enabled mods, including the PYDT hotseat limiter', () => {
+    const result = parse(readFileSync(join(__dirname, './PachacutiAnt1.Civ7Save')));
+
+    expect(result.hasMod('pydt-hotseat-limiter')).toBe(true);
+    expect(result.hasMod('mod-that-is-not-installed')).toBe(false);
+
+    const limiter = result.mods.find(m => m.id === 'pydt-hotseat-limiter');
+    expect(limiter).toMatchObject({
+      id: 'pydt-hotseat-limiter',
+      name: 'PYDT Hotseat Turn Limiter',
+      enabled: true
+    });
+
+    // base game modules are always present
+    expect(result.mods.map(m => m.id)).toEqual(expect.arrayContaining(['base-standard', 'core']));
+  });
 });

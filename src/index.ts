@@ -50,7 +50,12 @@ export const GAME_DATA_MARKERS = {
   PLAYER_TYPE: Buffer.from([0xd4, 0x5f, 0x83, 0x28]),
   // Per-player id, matching the in-game player id / localPlayerID space.
   // Confirmed: Lakshmibai=0, Augustus=1, Franklin=2.
-  PLAYER_ID: Buffer.from([0xde, 0xf6, 0x2d, 0x9b])
+  PLAYER_ID: Buffer.from([0xde, 0xf6, 0x2d, 0x9b]),
+  // Enabled mods/DLC/ages: a NestedArray in group1 of mod records.
+  ENABLED_MODS: Buffer.from([0x5c, 0xae, 0x27, 0x84]),
+  MOD_ID: Buffer.from([0x76, 0x61, 0x2f, 0xe5]),
+  MOD_DISPLAY_NAME: Buffer.from([0x98, 0x26, 0x0b, 0xea]),
+  MOD_ENABLED: Buffer.from([0x8c, 0xce, 0x87, 0x4d])
 };
 
 export enum PlayerType {
@@ -113,10 +118,51 @@ export const parse = (data: Buffer) => {
   return parseChunks(chunks);
 };
 
+export interface Civ7Mod {
+  id: string;
+  name: string;
+  enabled: boolean;
+}
+
+/**
+ * The enabled mods / DLC / ages from the ENABLED_MODS block in group1.
+ * Includes everything the game lists (base-standard, core, age-*, persona packs,
+ * and any user mods like "pydt-hotseat-limiter").
+ */
+export const parseMods = (group1: Civ7Chunk[]): Civ7Mod[] => {
+  const block = group1.find(x => x.marker.equals(GAME_DATA_MARKERS.ENABLED_MODS));
+
+  if (!block || block.type !== ChunkType.NestedArray) {
+    return [];
+  }
+
+  return block.value.flatMap(record => {
+    const id = record.find(c => c.marker.equals(GAME_DATA_MARKERS.MOD_ID));
+    const name = record.find(c => c.marker.equals(GAME_DATA_MARKERS.MOD_DISPLAY_NAME));
+    const enabled = record.find(c => c.marker.equals(GAME_DATA_MARKERS.MOD_ENABLED));
+
+    if (typeof id?.value !== 'string') {
+      return [];
+    }
+
+    return [
+      {
+        id: id.value,
+        name: typeof name?.value === 'string' ? name.value : '',
+        enabled: enabled?.value === '1'
+      }
+    ];
+  });
+};
+
 export const parseChunks = (data: RawChunkData) => {
+  const mods = parseMods(data.group1);
+
   return {
     turn: data.group1.find(x => x.marker.equals(GAME_DATA_MARKERS.GAME_TURN)),
     age: data.group1.find(x => x.marker.equals(GAME_DATA_MARKERS.GAME_AGE)),
+    mods,
+    hasMod: (id: string) => mods.some(m => m.id === id && m.enabled),
     players: data.group3.flatMap(x => {
       if (x.type === ChunkType.ChunkArray) {
         const leader = x.value.find(y => y.marker.equals(GAME_DATA_MARKERS.LEADER_NAME) && y.value);
