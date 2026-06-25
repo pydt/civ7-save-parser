@@ -51,6 +51,8 @@ export const GAME_DATA_MARKERS = {
   // Per-player id, matching the in-game player id / localPlayerID space.
   // Confirmed: Lakshmibai=0, Augustus=1, Franklin=2.
   PLAYER_ID: Buffer.from([0xde, 0xf6, 0x2d, 0x9b]),
+  GAME_SPEED: Buffer.from([0x99, 0xb0, 0xd9, 0x05]),
+  MAP_SIZE: Buffer.from([0x40, 0x5c, 0x83, 0x0b]),
   // Enabled mods/DLC/ages: a NestedArray in group1 of mod records.
   ENABLED_MODS: Buffer.from([0x5c, 0xae, 0x27, 0x84]),
   MOD_ID: Buffer.from([0x76, 0x61, 0x2f, 0xe5]),
@@ -118,52 +120,6 @@ export const parse = (data: Buffer) => {
   return parseChunks(chunks);
 };
 
-export interface PydtTurnData {
-  /** Player id (localPlayerID) of the player whose turn it is. */
-  currentPlayer?: number;
-  /** Game turn number. */
-  turn?: number;
-  /** All key=value fields the mod wrote, raw. */
-  fields: Record<string, string>;
-}
-
-/**
- * Reads the turn data stamped into the save by the PYDT companion mod, which
- * writes `GameTutorial.setProperty("PYDT", "PYDT_TURN|player=<id>|turn=<n>")` on
- * turn end. The value persists as a plain UTF-8 chunk in the compressed game
- * state, so we decompress and match our own prefix — no format RE required.
- * Returns undefined if the mod data isn't present (mod not installed / not yet
- * written). This is how PYDT validates that an uploaded save is actually at the
- * expected player's turn.
- */
-export const parsePydtTurnData = (data: Buffer): PydtTurnData | undefined => {
-  const decompressed = decompress(data);
-
-  if (!decompressed) {
-    return undefined;
-  }
-
-  // The value is a null-terminated UTF-8 string chunk; capture up to the null.
-  const match = decompressed.toString('latin1').match(/PYDT_TURN\|([^\0]*)/);
-
-  if (!match) {
-    return undefined;
-  }
-
-  const fields: Record<string, string> = {};
-  for (const part of match[1].split('|')) {
-    const eq = part.indexOf('=');
-    if (eq > 0) {
-      fields[part.slice(0, eq)] = part.slice(eq + 1);
-    }
-  }
-
-  const num = (value?: string) =>
-    value !== undefined && /^\d+$/.test(value) ? Number(value) : undefined;
-
-  return { currentPlayer: num(fields.player), turn: num(fields.turn), fields };
-};
-
 export interface Civ7Mod {
   id: string;
   name: string;
@@ -207,6 +163,8 @@ export const parseChunks = (data: RawChunkData) => {
   return {
     turn: data.group1.find(x => x.marker.equals(GAME_DATA_MARKERS.GAME_TURN)),
     age: data.group1.find(x => x.marker.equals(GAME_DATA_MARKERS.GAME_AGE)),
+    gameSpeed: data.group1.find(x => x.marker.equals(GAME_DATA_MARKERS.GAME_SPEED)),
+    mapSize: data.group1.find(x => x.marker.equals(GAME_DATA_MARKERS.MAP_SIZE)),
     mods,
     hasMod: (id: string) => mods.some(m => m.id === id && m.enabled),
     players: data.group3.flatMap(x => {
