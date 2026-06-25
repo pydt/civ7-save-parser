@@ -70,10 +70,32 @@ fixed-offset code couldn't handle. `parseRaw` now:
 - locates group5 by scanning for the first real marker
 - never throws on the later groups, so groups 1–3 (the player data) always parse
 
-## Current player / whose turn — it's a per-player flag, ONLY in the compressed data
+## Current player / whose turn — SOLVED via the PYDT companion mod
 
-**Conclusion: whose-turn is the per-player `isTurnActive` boolean and it lives
-only in the compressed game state — it is NOT in the uncompressed data.**
+**The game itself doesn't expose whose-turn in any readable way (see below), so we
+get it from the PYDT companion mod instead.** The mod writes the active player
+into the save on turn end:
+
+```js
+GameTutorial.setProperty("PYDT", "PYDT_TURN|player=" + GameContext.localPlayerID + "|turn=" + Game.turn);
+```
+
+`GameTutorial.setProperty` persists the value as a plain null-terminated UTF-8
+chunk inside the compressed game state (the key is hashed into a 4-byte marker,
+but the *value* is stored verbatim). So PYDT just `decompress()`es and matches its
+own chosen prefix — `parsePydtTurnData()` returns `{ currentPlayer, turn, fields }`.
+This is the line-233 validation: confirm an uploaded save is at the expected
+player's turn, with no RE of the proprietary format. Notes: `Game.setProperty`
+did NOT persist in testing; `GameTutorial.setProperty` did (verified end to end in
+`EmperorAnt1`). The mod must write on the turn-end / pre-save event so the value
+reflects the player who just acted.
+
+### Why we couldn't read it from the game's own data
+
+Whose-turn is the per-player `isTurnActive` boolean and it lives **only in the
+compressed game state — NOT in the uncompressed data**, in a hash/position-keyed
+form with no field names that resists save-diffing (details below). That's why
+the mod-stamped property is the practical answer.
 
 Ground truth (in-game console, `GameContext.localPlayerID` + the player object's
 `isTurnActive`): the active player = `localPlayerID`. Confirmed: `LakshmibaiAnt2`

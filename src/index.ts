@@ -118,6 +118,52 @@ export const parse = (data: Buffer) => {
   return parseChunks(chunks);
 };
 
+export interface PydtTurnData {
+  /** Player id (localPlayerID) of the player whose turn it is. */
+  currentPlayer?: number;
+  /** Game turn number. */
+  turn?: number;
+  /** All key=value fields the mod wrote, raw. */
+  fields: Record<string, string>;
+}
+
+/**
+ * Reads the turn data stamped into the save by the PYDT companion mod, which
+ * writes `GameTutorial.setProperty("PYDT", "PYDT_TURN|player=<id>|turn=<n>")` on
+ * turn end. The value persists as a plain UTF-8 chunk in the compressed game
+ * state, so we decompress and match our own prefix — no format RE required.
+ * Returns undefined if the mod data isn't present (mod not installed / not yet
+ * written). This is how PYDT validates that an uploaded save is actually at the
+ * expected player's turn.
+ */
+export const parsePydtTurnData = (data: Buffer): PydtTurnData | undefined => {
+  const decompressed = decompress(data);
+
+  if (!decompressed) {
+    return undefined;
+  }
+
+  // The value is a null-terminated UTF-8 string chunk; capture up to the null.
+  const match = decompressed.toString('latin1').match(/PYDT_TURN\|([^\0]*)/);
+
+  if (!match) {
+    return undefined;
+  }
+
+  const fields: Record<string, string> = {};
+  for (const part of match[1].split('|')) {
+    const eq = part.indexOf('=');
+    if (eq > 0) {
+      fields[part.slice(0, eq)] = part.slice(eq + 1);
+    }
+  }
+
+  const num = (value?: string) =>
+    value !== undefined && /^\d+$/.test(value) ? Number(value) : undefined;
+
+  return { currentPlayer: num(fields.player), turn: num(fields.turn), fields };
+};
+
 export interface Civ7Mod {
   id: string;
   name: string;

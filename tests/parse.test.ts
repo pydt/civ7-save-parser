@@ -1,5 +1,5 @@
 import { readFileSync } from 'fs';
-import { parse } from '../src/index';
+import { parse, parsePydtTurnData } from '../src/index';
 import { join } from 'path';
 
 describe('Parsing', () => {
@@ -98,5 +98,20 @@ describe('Parsing', () => {
 
     // base game modules are always present
     expect(result.mods.map(m => m.id)).toEqual(expect.arrayContaining(['base-standard', 'core']));
+  });
+
+  it('reads the current player stamped into the save by the PYDT mod', () => {
+    // The companion mod wrote GameTutorial.setProperty("PYDT", "PYDT_TURN|player=1|turn=1")
+    const turnData = parsePydtTurnData(readFileSync(join(__dirname, './EmperorAnt1.Civ7Save')));
+
+    expect(turnData).toBeDefined();
+    expect(turnData?.currentPlayer).toBe(1);
+    expect(turnData?.turn).toBe(1);
+  });
+
+  it('returns undefined PYDT turn data when the mod has not stamped the save', () => {
+    expect(
+      parsePydtTurnData(readFileSync(join(__dirname, './RizalExp1.Civ7Save')))
+    ).toBeUndefined();
   });
 });
