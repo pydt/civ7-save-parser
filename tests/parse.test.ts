@@ -1,5 +1,5 @@
 import { readFileSync } from 'fs';
-import { parse, decompress } from '../src/index';
+import { parse, decompress, setPlayerType, PlayerType } from '../src/index';
 import { join } from 'path';
 
 describe('Parsing', () => {
@@ -107,5 +107,36 @@ describe('Parsing', () => {
     // the blob is the bulk game state — multiple MB, and contains the game GUID
     expect(decompressed!.length).toBeGreaterThan(1_000_000);
     expect(decompressed!.includes(Buffer.from('BABB79B4', 'latin1'))).toBe(true);
+  });
+
+  it('sets a player to AI (for turn skipping) as an in-place edit', () => {
+    const data = readFileSync(join(__dirname, './LakshmibaiAnt2.Civ7Save'));
+
+    // Lakshmibai (id 0) and Augustus (id 1) are the two humans
+    expect(
+      parse(data)
+        .players.filter(p => p.isHuman)
+        .map(p => p.id)
+        .sort()
+    ).toEqual([0, 1]);
+
+    const modified = setPlayerType(data, 0, PlayerType.AI);
+
+    // exactly one byte changed (the PLAYER_TYPE value), same length
+    expect(modified.length).toBe(data.length);
+    let changed = 0;
+    for (let i = 0; i < data.length; i++) {
+      if (data[i] !== modified[i]) {
+        changed++;
+      }
+    }
+    expect(changed).toBe(1);
+
+    // Lakshmibai now reads as AI; Augustus is still human
+    const after = parse(modified);
+    expect(after.players.find(p => p.id === 0)?.isHuman).toBe(false);
+    expect(after.players.find(p => p.id === 1)?.isHuman).toBe(true);
+
+    expect(() => setPlayerType(data, 99, PlayerType.AI)).toThrow();
   });
 });

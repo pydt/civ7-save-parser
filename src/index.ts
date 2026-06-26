@@ -120,6 +120,40 @@ export const parse = (data: Buffer) => {
   return parseChunks(chunks);
 };
 
+/**
+ * Set a player's type (Human / AI) by their id, returning a new buffer. Used for
+ * turn-skipping: flip a player to AI so the game plays their turn. PLAYER_TYPE is
+ * a fixed-size Number32, so this is an in-place edit — nothing shifts.
+ *
+ * NOTE: this only changes the id-keyed group3 player record. Whether the game
+ * honors that alone (vs. also needing the group6 / compressed copies) needs
+ * in-game verification.
+ */
+export const setPlayerType = (data: Buffer, playerId: number, type: PlayerType): Buffer => {
+  const result = Buffer.from(data);
+  const raw = parseRaw(result);
+  let changed = false;
+
+  for (const record of raw.group3) {
+    if (record.type === ChunkType.ChunkArray) {
+      const idChunk = record.value.find(c => c.marker.equals(GAME_DATA_MARKERS.PLAYER_ID));
+      const typeChunk = record.value.find(c => c.marker.equals(GAME_DATA_MARKERS.PLAYER_TYPE));
+
+      if (idChunk?.value === playerId && typeChunk) {
+        // Number32 value sits 8 bytes into the chunk data.
+        result.writeUInt32LE(type, typeChunk.dataStartOffset + 8);
+        changed = true;
+      }
+    }
+  }
+
+  if (!changed) {
+    throw new Error(`No player with id ${playerId} found in the save`);
+  }
+
+  return result;
+};
+
 export interface Civ7Mod {
   id: string;
   name: string;
