@@ -1,5 +1,5 @@
 import { readFileSync } from 'fs';
-import { inflateSync, constants } from 'zlib';
+import { inflateSync, deflateSync, constants } from 'zlib';
 import minimist from 'minimist';
 
 // The bulk game state (units, tiles, per-player data, whose turn it is) lives in
@@ -38,6 +38,68 @@ export const decompress = (data: Buffer): Buffer | null => {
   }
 
   return inflateSync(Buffer.concat(blocks), { finishFlush: constants.Z_SYNC_FLUSH });
+};
+
+const COMPRESSED_BLOCK_SIZE = 64 * 1024;
+
+/** Locate the compressed section: [start, end) covers the length-prefixed blocks
+ *  (everything before `start` is the uncompressed header; everything from `end`
+ *  is the trailer, whose leading u32=1 terminates block reading). */
+const compressedBounds = (data: Buffer): { start: number; end: number } | null => {
+  const start = data.indexOf(COMPRESSED_DATA_START);
+  if (start < 0) {
+    return null;
+  }
+
+  let pos = start;
+  let blockLen = data.readUInt32LE(pos);
+  pos += 4;
+  while (blockLen > 1 && pos + blockLen <= data.length) {
+    pos += blockLen;
+    if (pos + 4 > data.length) {
+      break;
+    }
+    blockLen = data.readUInt32LE(pos);
+    pos += 4;
+  }
+
+  return { start, end: pos };
+};
+
+/** Deflate + re-chunk into the save's length-prefixed block framing (inverse of
+ *  the block reading in decompress()). */
+const recompress = (decompressed: Buffer): Buffer => {
+  // Default level (6) keeps the zlib header at 78 9c, matching the game's saves
+  // and our COMPRESSED_DATA_START detection. (Level 9 would emit 78 da.)
+  const deflated = deflateSync(decompressed, { finishFlush: constants.Z_SYNC_FLUSH });
+  const parts: Buffer[] = [];
+  for (let pos = 0; pos < deflated.length; pos += COMPRESSED_BLOCK_SIZE) {
+    const block = deflated.subarray(pos, pos + COMPRESSED_BLOCK_SIZE);
+    const len = Buffer.alloc(4);
+    len.writeUInt32LE(block.length);
+    parts.push(len, block);
+  }
+  return Buffer.concat(parts);
+};
+
+/**
+ * Write a modified game-state blob back into a save: keeps the uncompressed
+ * header and trailer, re-compresses the (modified) decompressed data, and
+ * reassembles. `modifiedDecompressed` is the buffer from decompress(), edited.
+ * Recompressed bytes differ from the original (zlib vs the game's compressor) but
+ * decompress to the same data; the game accepts re-written saves.
+ */
+export const writeCompressedData = (originalSave: Buffer, modifiedDecompressed: Buffer): Buffer => {
+  const bounds = compressedBounds(originalSave);
+  if (!bounds) {
+    throw new Error('Save has no compressed section');
+  }
+
+  return Buffer.concat([
+    originalSave.subarray(0, bounds.start),
+    recompress(modifiedDecompressed),
+    originalSave.subarray(bounds.end)
+  ]);
 };
 
 export const GAME_DATA_MARKERS = {

@@ -1,5 +1,5 @@
 import { readFileSync } from 'fs';
-import { parse, decompress, setPlayerType, PlayerType } from '../src/index';
+import { parse, decompress, writeCompressedData, setPlayerType, PlayerType } from '../src/index';
 import { join } from 'path';
 
 describe('Parsing', () => {
@@ -107,6 +107,24 @@ describe('Parsing', () => {
     // the blob is the bulk game state — multiple MB, and contains the game GUID
     expect(decompressed!.length).toBeGreaterThan(1_000_000);
     expect(decompressed!.includes(Buffer.from('BABB79B4', 'latin1'))).toBe(true);
+  });
+
+  it('round-trips the compressed game state (decompress -> writeCompressedData)', () => {
+    const original = readFileSync(join(__dirname, './RizalExp1.Civ7Save'));
+    const decompressed = decompress(original)!;
+
+    // edit the game state, then write it back into a valid save
+    const edited = Buffer.from(decompressed);
+    const marker = edited.indexOf(Buffer.from('BABB79B4', 'latin1'));
+    edited.write('CAFEF00D', marker, 'latin1'); // same-length edit
+
+    const rewritten = writeCompressedData(original, edited);
+
+    // the rewritten save decompresses back to exactly our edited buffer
+    const roundTripped = decompress(rewritten)!;
+    expect(roundTripped.equals(edited)).toBe(true);
+    expect(roundTripped.includes(Buffer.from('CAFEF00D', 'latin1'))).toBe(true);
+    expect(roundTripped.includes(Buffer.from('BABB79B4', 'latin1'))).toBe(false);
   });
 
   it('sets a player to AI (for turn skipping) as an in-place edit', () => {
