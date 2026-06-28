@@ -57,13 +57,15 @@ const compressedBounds = (data: Buffer): { start: number; end: number } | null =
   while (blockLen > 1 && pos + blockLen <= data.length) {
     pos += blockLen;
     if (pos + 4 > data.length) {
-      break;
+      return { start, end: pos };
     }
     blockLen = data.readUInt32LE(pos);
     pos += 4;
   }
 
-  return { start, end: pos };
+  // We exited by reading the terminator (blockLen <= 1) and advanced 4 past it;
+  // back up so the trailer (the terminator onward) stays with the footer.
+  return { start, end: pos - 4 };
 };
 
 /** Deflate + re-chunk into the save's length-prefixed block framing (inverse of
