@@ -105,17 +105,12 @@ fn format_marker(u32 m) {
 };
 
 using civ7_chunk;
+using markerless_chunk;
 
-struct array_chunk {
-    u64 oned;
-    u32 one;
-    u32 blank;
-    u32 len;
-    civ7_chunk chunks[len];
-};
-
-struct civ7_chunk {
-    u32 marker [[format("format_marker")]];
+// The body of a chunk (everything after the optional 4-byte marker): the u64
+// type tag followed by a type-specific payload. Shared by marker-prefixed chunks
+// (civ7_chunk) and the markerless items inside a NestedArray (markerless_chunk).
+struct chunk_body {
     u64 type;   // low u32 is the type tag; high u32 is padding/zero
 
     if (type == 1) {
@@ -180,17 +175,23 @@ struct civ7_chunk {
     }
 
     if (type == 29) {
-        // ChunkArray — a record of sub-chunks (e.g. each group3 player)
+        // ChunkArray — a record of marker-prefixed sub-chunks (e.g. each group3
+        // player: player.LEADER, player.CIVILIZATION, player.PLAYER_TYPE, ...)
         u32 wat[2];
         u32 len;
         civ7_chunk chunks[len];
     }
 
     if (type == 30) {
-        // NestedArray (e.g. ENABLED_MODS) — array of sub-records
+        // NestedArray — an array of MARKERLESS items. Each item carries its own
+        // type tag and dispatches like any chunk: it may be a ChunkArray record
+        // (e.g. ENABLED_MODS, each item a mod's ID/ENABLED/DISPLAY_NAME sub-chunks)
+        // OR a plain value such as the age-crisis string list (type-2 strings like
+        // ANTIQUITY_CRISIS_INVASION). Modeling every item as a record breaks the
+        // string case — see the parser's markerless NestedArray handling.
         u32 wat[2];
         u32 len;
-        array_chunk chunks[len];
+        markerless_chunk items[len];
     }
 
     if (type == 32) {
@@ -201,6 +202,17 @@ struct civ7_chunk {
     }
 
     std::assert(type <= 32, "Bad type");
+};
+
+// A marker-prefixed chunk: 4-byte field-name hash, then the shared body.
+struct civ7_chunk {
+    u32 marker [[format("format_marker")]];
+    chunk_body body;
+};
+
+// A NestedArray item: the same body with NO leading 4-byte marker.
+struct markerless_chunk {
+    chunk_body body;
 };
 
 // Scans from `from` for the start of the next group: the first real marker

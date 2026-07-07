@@ -393,11 +393,14 @@ export const readNChunks = (data: Buffer, offset: number, numChunks: number): Ci
   return chunks;
 };
 
-export const parseChunk = (data: Buffer, offset: number): Civ7Chunk => {
-  const marker = data.subarray(offset, offset + 4);
-  const type = data.readUint32LE(offset + 4);
+// `hasMarker = false` parses a "markerless" chunk (just [type][body], no leading
+// 4-byte marker) — the item format inside a NestedArray. Everything downstream
+// keys off dataStartOffset, so the two forms share the same body-parsing switch.
+export const parseChunk = (data: Buffer, offset: number, hasMarker = true): Civ7Chunk => {
+  const marker = hasMarker ? data.subarray(offset, offset + 4) : data.subarray(offset, offset);
+  const type = data.readUint32LE(hasMarker ? offset + 4 : offset);
 
-  const dataStartOffset = offset + 12;
+  const dataStartOffset = hasMarker ? offset + 12 : offset + 8;
 
   switch (type) {
     case ChunkType.Unknown_1:
@@ -502,14 +505,17 @@ export const parseChunk = (data: Buffer, offset: number): Civ7Chunk => {
 
     case ChunkType.NestedArray: {
       const itemCount = data.readUint32LE(dataStartOffset + 8);
-      const result = [];
+      const result: Civ7Chunk[][] = [];
       let endOffset = dataStartOffset + 12;
 
       for (let i = 0; i < itemCount; i++) {
-        const len = data.readUInt32LE(endOffset + 16);
-        const subChunks = readNChunks(data, endOffset + 20, len);
-        result.push(subChunks);
-        endOffset = subChunks[subChunks.length - 1]?.endOffset;
+        // Each item is a markerless chunk. Usually a ChunkArray record (e.g. an
+        // ENABLED_MODS entry) — kept as its sub-chunk list to preserve the
+        // Civ7Chunk[][] shape — but can also be a plain value chunk such as a
+        // string (e.g. the age-crisis type list), which becomes a 1-element list.
+        const item = parseChunk(data, endOffset, false);
+        result.push(item.type === ChunkType.ChunkArray ? item.value : [item]);
+        endOffset = item.endOffset;
       }
 
       return {

@@ -100,6 +100,18 @@ describe('Parsing', () => {
     expect(result.mods.map(m => m.id)).toEqual(expect.arrayContaining(['base-standard', 'core']));
   });
 
+  it('parses a save with a string-item NestedArray (age-crisis list)', () => {
+    // 000002 previously threw "Could not parse chunk" — it has a NestedArray whose
+    // items are markerless string chunks (ANTIQUITY_CRISIS_*), not sub-chunk records.
+    const result = parse(readFileSync(join(__dirname, './000002.Civ7Save')));
+
+    expect(result.turn?.value).toBe(1);
+    expect(result.age?.value).toBe('AGE_ANTIQUITY');
+    expect(result.players.length).toBe(8);
+    // mods (a record-item NestedArray) still parse alongside the string-item one
+    expect(result.mods.map(m => m.id)).toEqual(expect.arrayContaining(['base-standard', 'core']));
+  });
+
   it('decompresses the compressed game-state blob', () => {
     const decompressed = decompress(readFileSync(join(__dirname, './RizalExp1.Civ7Save')));
 
