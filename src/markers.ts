@@ -361,10 +361,10 @@ export const MARKERS: Record<string, MarkerInfo> = {
     note: 'type17, 12b'
   },
   def62d9b: {
-    name: 'player.PLAYER_ID',
+    name: 'player.TEAM_ID',
     group: 'group3',
     confidence: 'known',
-    note: 'player id / 0-based turn-order index (Lakshmibai=0, Augustus=1...). Matches in-game localPlayerID. Used with CURRENT_PLAYER (af61f36a) to derive isCurrentTurn.'
+    note: "Renamed from a PLAYER_ID guess: in team games (tests/teams_*.Civ7Save) teammates share this value (e.g. two 4-team pairs all read 0/1/2/3), so it is NOT a unique player id. In FFA games it happens to equal a per-player index since each player is their own team — that coincidence is what led to the original PLAYER_ID guess. Use PLAYER_SLOT_MARKERS (the group3 record's own marker) for a unique per-player id instead."
   },
   '592439a2': {
     name: 'player.unknown_592439a2',
@@ -455,7 +455,24 @@ export const MARKERS: Record<string, MarkerInfo> = {
     group: 'group3',
     confidence: 'guess',
     note: 'number (hash-like)'
-  }
+  },
+
+  // ---- group3: fixed player-slot markers (see PLAYER_SLOT_MARKERS in index.ts) ----
+  // Each of these IS a group3 record's own ChunkArray marker (not a field inside
+  // one). Confirmed identical marker-to-slot-number order across every save
+  // captured so far, including tests/teams_*.Civ7Save (4v4 teams).
+  b861f0f4: { name: 'player.SLOT_0', group: 'group3', confidence: 'known', note: 'slot 0' },
+  '2e51f783': { name: 'player.SLOT_1', group: 'group3', confidence: 'known', note: 'slot 1' },
+  '9400fe1a': { name: 'player.SLOT_2', group: 'group3', confidence: 'known', note: 'slot 2' },
+  '0230f96d': { name: 'player.SLOT_3', group: 'group3', confidence: 'known', note: 'slot 3' },
+  a1a59df3: { name: 'player.SLOT_4', group: 'group3', confidence: 'known', note: 'slot 4' },
+  '37959a84': { name: 'player.SLOT_5', group: 'group3', confidence: 'known', note: 'slot 5' },
+  '8dc4931d': { name: 'player.SLOT_6', group: 'group3', confidence: 'known', note: 'slot 6' },
+  '1bf4946a': { name: 'player.SLOT_7', group: 'group3', confidence: 'known', note: 'slot 7' },
+  '8ae92bfa': { name: 'player.SLOT_8', group: 'group3', confidence: 'known', note: 'slot 8' },
+  '1cd92c8d': { name: 'player.SLOT_9', group: 'group3', confidence: 'known', note: 'slot 9' },
+  '32ca8cfa': { name: 'player.SLOT_10', group: 'group3', confidence: 'known', note: 'slot 10' },
+  a4fa8b8d: { name: 'player.SLOT_11', group: 'group3', confidence: 'known', note: 'slot 11' }
 };
 
 /** Look up a marker by its little-endian hex string (as stored in the file). */

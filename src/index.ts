@@ -112,9 +112,13 @@ export const GAME_DATA_MARKERS = {
   // Per-player actor type. Civ6 called this ACTOR_AI_HUMAN (marker 95b942ce);
   // Civ7 renamed the marker but kept the value encoding: 3 = Human, 1 = AI.
   PLAYER_TYPE: Buffer.from([0xd4, 0x5f, 0x83, 0x28]),
-  // Per-player id, matching the in-game player id / localPlayerID space.
-  // Confirmed: Lakshmibai=0, Augustus=1, Franklin=2.
-  PLAYER_ID: Buffer.from([0xde, 0xf6, 0x2d, 0x9b]),
+  // Per-player TEAM id (renamed from an earlier PLAYER_ID guess). In FFA games
+  // each player is on their own team, so this happens to equal a per-player
+  // index (0,1,2...) with no collisions — which is how we originally mistook
+  // it for a player id. In team games (see tests/teams_*.Civ7Save) teammates
+  // share the same value, so it CANNOT be used to uniquely address a player.
+  // Use PLAYER_SLOT_MARKERS / the `id` field derived from it instead.
+  TEAM_ID: Buffer.from([0xde, 0xf6, 0x2d, 0x9b]),
   GAME_SPEED: Buffer.from([0x99, 0xb0, 0xd9, 0x05]),
   MAP_SIZE: Buffer.from([0x40, 0x5c, 0x83, 0x0b]),
   // Enabled mods/DLC/ages: a NestedArray in group1 of mod records.
@@ -122,6 +126,41 @@ export const GAME_DATA_MARKERS = {
   MOD_ID: Buffer.from([0x76, 0x61, 0x2f, 0xe5]),
   MOD_DISPLAY_NAME: Buffer.from([0x98, 0x26, 0x0b, 0xea]),
   MOD_ENABLED: Buffer.from([0x8c, 0xce, 0x87, 0x4d])
+};
+
+/**
+ * Fixed, game-defined "slot" table — the Civ7 analogue of Civ6's SLOT_HEADERS.
+ * Each group3 player record is itself keyed by one of these markers (i.e. it's
+ * `record.marker`, not a field inside the record), and the marker-to-slot-number
+ * association never changes: verified byte-identical order across every save
+ * we've captured (single-player, hotseat, and 4v4 teams — see
+ * tests/teams_*.Civ7Save), regardless of which civs/leaders occupy which slot.
+ *
+ * Unlike TEAM_ID, a slot is never shared between players, so it's the right
+ * identifier to address a specific player (e.g. for setPlayerType). We've only
+ * confirmed the 12 slots that have held a full civ in our sample saves (up to
+ * 12 players); the remainder of the underlying table is city-state-only slots.
+ */
+export const PLAYER_SLOT_MARKERS = [
+  Buffer.from([0xb8, 0x61, 0xf0, 0xf4]), // slot 0
+  Buffer.from([0x2e, 0x51, 0xf7, 0x83]), // slot 1
+  Buffer.from([0x94, 0x00, 0xfe, 0x1a]), // slot 2
+  Buffer.from([0x02, 0x30, 0xf9, 0x6d]), // slot 3
+  Buffer.from([0xa1, 0xa5, 0x9d, 0xf3]), // slot 4
+  Buffer.from([0x37, 0x95, 0x9a, 0x84]), // slot 5
+  Buffer.from([0x8d, 0xc4, 0x93, 0x1d]), // slot 6
+  Buffer.from([0x1b, 0xf4, 0x94, 0x6a]), // slot 7
+  Buffer.from([0x8a, 0xe9, 0x2b, 0xfa]), // slot 8
+  Buffer.from([0x1c, 0xd9, 0x2c, 0x8d]), // slot 9
+  Buffer.from([0x32, 0xca, 0x8c, 0xfa]), // slot 10
+  Buffer.from([0xa4, 0xfa, 0x8b, 0x8d]) // slot 11
+];
+
+/** The slot index (0-based, see PLAYER_SLOT_MARKERS) for a group3 player
+ *  record, or undefined if its marker isn't one of the known player slots. */
+export const getSlotIndex = (recordMarker: Buffer): number | undefined => {
+  const index = PLAYER_SLOT_MARKERS.findIndex(m => m.equals(recordMarker));
+  return index >= 0 ? index : undefined;
 };
 
 export enum PlayerType {
@@ -185,13 +224,14 @@ export const parse = (data: Buffer) => {
 };
 
 /**
- * Set a player's type (Human / AI) by their id, returning a new buffer. Used for
- * turn-skipping: flip a player to AI so the game plays their turn. PLAYER_TYPE is
- * a fixed-size Number32, so this is an in-place edit — nothing shifts.
+ * Set a player's type (Human / AI) by their slot id (see PLAYER_SLOT_MARKERS),
+ * returning a new buffer. Used for turn-skipping: flip a player to AI so the
+ * game plays their turn. PLAYER_TYPE is a fixed-size Number32, so this is an
+ * in-place edit — nothing shifts.
  *
- * NOTE: this only changes the id-keyed group3 player record. Whether the game
- * honors that alone (vs. also needing the group6 / compressed copies) needs
- * in-game verification.
+ * NOTE: this only changes the slot-keyed group3 player record. Whether the
+ * game honors that alone (vs. also needing the group6 / compressed copies)
+ * needs in-game verification.
  */
 export const setPlayerType = (data: Buffer, playerId: number, type: PlayerType): Buffer => {
   const result = Buffer.from(data);
@@ -200,10 +240,9 @@ export const setPlayerType = (data: Buffer, playerId: number, type: PlayerType):
 
   for (const record of raw.group3) {
     if (record.type === ChunkType.ChunkArray) {
-      const idChunk = record.value.find(c => c.marker.equals(GAME_DATA_MARKERS.PLAYER_ID));
       const typeChunk = record.value.find(c => c.marker.equals(GAME_DATA_MARKERS.PLAYER_TYPE));
 
-      if (idChunk?.value === playerId && typeChunk) {
+      if (getSlotIndex(record.marker) === playerId && typeChunk) {
         // Number32 value sits 8 bytes into the chunk data.
         result.writeUInt32LE(type, typeChunk.dataStartOffset + 8);
         changed = true;
@@ -270,19 +309,24 @@ export const parseChunks = (data: RawChunkData) => {
         const leader = x.value.find(y => y.marker.equals(GAME_DATA_MARKERS.LEADER_NAME) && y.value);
         const civ = x.value.find(y => y.marker.equals(GAME_DATA_MARKERS.CIV_NAME) && y.value);
         const playerType = x.value.find(y => y.marker.equals(GAME_DATA_MARKERS.PLAYER_TYPE));
-        const playerId = x.value.find(y => y.marker.equals(GAME_DATA_MARKERS.PLAYER_ID));
+        const team = x.value.find(y => y.marker.equals(GAME_DATA_MARKERS.TEAM_ID));
 
         if (leader && civ) {
-          // PLAYER_ID matches the in-game player id / localPlayerID space
-          // (confirmed: Lakshmibai=0, Augustus=1, Franklin=2). Whose turn it is
-          // (localPlayerID) is NOT in the uncompressed data — see REVERSING.md.
-          const id = typeof playerId?.value === 'number' ? playerId.value : undefined;
+          // `id` is the player's fixed slot number (see PLAYER_SLOT_MARKERS) —
+          // unique per player, stable across saves, and what setPlayerType()
+          // expects. `teamId` groups players (e.g. tests/teams_*.Civ7Save has
+          // 4 teams of 2); in FFA games teamId happens to equal `id` since
+          // each player is their own team. Whose turn it is (localPlayerID)
+          // is NOT in the uncompressed data — see REVERSING.md.
+          const id = getSlotIndex(x.marker);
+          const teamId = typeof team?.value === 'number' ? team.value : undefined;
           return [
             {
               leader,
               civ,
               playerType,
               id,
+              teamId,
               isHuman: playerType?.value === PlayerType.HUMAN
             }
           ];

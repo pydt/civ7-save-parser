@@ -169,4 +169,40 @@ describe('Parsing', () => {
 
     expect(() => setPlayerType(data, 99, PlayerType.AI)).toThrow();
   });
+
+  it('distinguishes teammates by slot id even though they share a team id', () => {
+    // teams_ashoka / teams_teach are the same 4v4-teams save (viewed from two
+    // different clients): 8 civs, 4 teams of 2. What we used to call `id`
+    // (PLAYER_ID) is really TEAM_ID and collides within a team, so `id` (slot)
+    // is what must stay unique.
+    const result = parse(readFileSync(join(__dirname, './teams_ashoka.Civ7Save')));
+    expect(result.players.length).toBe(8);
+
+    const ids = result.players.map(p => p.id);
+    expect(new Set(ids).size).toBe(8); // slot ids are all unique
+
+    const teamIds = result.players.map(p => p.teamId).sort();
+    expect(teamIds).toEqual([0, 0, 1, 1, 2, 2, 3, 3]); // 4 teams of 2, teamId collides
+
+    const ashoka = result.players.find(p => p.leader.value === 'LEADER_ASHOKA');
+    const teach = result.players.find(p => p.leader.value === 'LEADER_EDWARD_TEACH');
+    expect(ashoka?.teamId).toBe(teach?.teamId); // teammates share a team id
+    expect(ashoka?.id).not.toBe(teach?.id); // but never a slot id
+  });
+
+  it('flips only the targeted teammate to AI, not their whole team', () => {
+    const data = readFileSync(join(__dirname, './teams_ashoka.Civ7Save'));
+    const before = parse(data);
+    const ashoka = before.players.find(p => p.leader.value === 'LEADER_ASHOKA')!;
+    const teach = before.players.find(p => p.leader.value === 'LEADER_EDWARD_TEACH')!;
+    expect(ashoka.teamId).toBe(teach.teamId); // same team, so a TEAM_ID-keyed edit would hit both
+
+    const modified = setPlayerType(data, ashoka.id!, PlayerType.AI);
+    const after = parse(modified);
+
+    expect(after.players.find(p => p.leader.value === 'LEADER_ASHOKA')?.isHuman).toBe(false);
+    expect(after.players.find(p => p.leader.value === 'LEADER_EDWARD_TEACH')?.isHuman).toBe(
+      teach.isHuman
+    );
+  });
 });
