@@ -119,6 +119,10 @@ export const GAME_DATA_MARKERS = {
   // share the same value, so it CANNOT be used to uniquely address a player.
   // Use PLAYER_SLOT_MARKERS / the `id` field derived from it instead.
   TEAM_ID: Buffer.from([0xde, 0xf6, 0x2d, 0x9b]),
+  // 12-byte value (three Number32 LE); byte offset 8 is an alive flag
+  // (1 = alive, 0 = defeated). Confirmed via tests/alive_valamas.Civ7Save vs
+  // tests/dead_valamas.Civ7Save — see markers.ts note.
+  ALIVE_FLAGS: Buffer.from([0x0e, 0xed, 0x6e, 0x29]),
   GAME_SPEED: Buffer.from([0x99, 0xb0, 0xd9, 0x05]),
   MAP_SIZE: Buffer.from([0x40, 0x5c, 0x83, 0x0b]),
   // Enabled mods/DLC/ages: a NestedArray in group1 of mod records.
@@ -310,6 +314,7 @@ export const parseChunks = (data: RawChunkData) => {
         const civ = x.value.find(y => y.marker.equals(GAME_DATA_MARKERS.CIV_NAME) && y.value);
         const playerType = x.value.find(y => y.marker.equals(GAME_DATA_MARKERS.PLAYER_TYPE));
         const team = x.value.find(y => y.marker.equals(GAME_DATA_MARKERS.TEAM_ID));
+        const aliveFlags = x.value.find(y => y.marker.equals(GAME_DATA_MARKERS.ALIVE_FLAGS));
 
         if (leader && civ) {
           // `id` is the player's fixed slot number (see PLAYER_SLOT_MARKERS) —
@@ -327,7 +332,11 @@ export const parseChunks = (data: RawChunkData) => {
               playerType,
               id,
               teamId,
-              isHuman: playerType?.value === PlayerType.HUMAN
+              isHuman: playerType?.value === PlayerType.HUMAN,
+              isAlive:
+                Buffer.isBuffer(aliveFlags?.value) && aliveFlags.value.length >= 12
+                  ? aliveFlags.value.readUInt32LE(8) === 1
+                  : undefined
             }
           ];
         }

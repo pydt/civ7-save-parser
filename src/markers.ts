@@ -278,10 +278,10 @@ export const MARKERS: Record<string, MarkerInfo> = {
     note: 'ACTOR_AI_HUMAN equivalent: 3 = Human, 1 = AI. Confirmed across all 4 saves (humans=3, AI & city-states=1). Civ6 used marker 95b942ce for this; the value encoding carried over.'
   },
   '0eed6e29': {
-    name: 'player.unknown_0eed6e29',
+    name: 'player.ALIVE_FLAGS',
     group: 'group3',
-    confidence: 'guess',
-    note: 'type1, 12b. Last word is 0/1; stays 1 for full civs, flips 0->1 on city-states/minor powers between turn 1 and turn 2 (per-actor "processed/met this turn"?). NOT the current-player flag.'
+    confidence: 'likely',
+    note: "type1, 12b (three Number32 LE). 3rd word (byte offset 8) = alive flag: 1 = alive, 0 = defeated. Confirmed via clean single-turn diff (tests/alive_valamas.Civ7Save turn51 vs tests/dead_valamas.Civ7Save turn52): only Ibn Battuta's (slot 2) 3rd word flipped 1->0 the turn he was defeated, all other 11 slots unchanged. Also seen flipping 0->1 on city-states/minor powers between turn 1 and turn 2 (met/spawned?) — same field, consistent with general alive/active semantics. NOT the current-player flag."
   },
   e385cc35: {
     name: 'player.unknown_e385cc35',

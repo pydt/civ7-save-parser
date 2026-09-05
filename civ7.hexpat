@@ -10,7 +10,10 @@ import std.mem;
 //  game-state blob (not described here):
 //    group1   game/session metadata (turn, age, settings, GUID, enabled mods)
 //    group2   4 small fixed records
-//    group3   per-player records (leader / civ / PLAYER_TYPE) + city-states
+//    group3   per-player records (leader / civ / PLAYER_TYPE / ALIVE_FLAGS) +
+//             city-states. Each record's OWN marker (player.SLOT_0..11) comes
+//             from a fixed slot table, not a field inside it — use that (not
+//             TEAM_ID, which collides between teammates) to address a player.
 //    (interstitial chunks — present only in hotseat / multiplayer saves)
 //    group4   Number32 flags / counters
 //    group5   small section
@@ -35,6 +38,7 @@ fn format_marker(u32 m) {
         (0xD0C68484): return "GAME_AGE";
         (0xE8615AFE): return "GAME_DATE";
         (0xF4E540D8): return "GAME_GUID";
+        (0x7CE6614D): return "GAME_SESSION_RECORD";        // group3 ChunkArray: session GUID, ruleset, age, gamespeed, difficulty, unknown_af61f36a
         (0xBDE62C9D): return "GAME_TURN";
         (0x05D9B099): return "GAMESPEED";
         (0xFAD3D4C3): return "GAMESPEED_DISPLAY_NAME";
@@ -52,6 +56,7 @@ fn format_marker(u32 m) {
         (0x306F37F9): return "PLATFORM";
         (0x1099AFBD): return "player.AGE_CIV_COLLECTION";
         (0xA61F8C33): return "player.AGE_CIV_COLLECTION_2";
+        (0x296EED0E): return "player.ALIVE_FLAGS";         // 3x u32; 3rd word 1=alive, 0=defeated
         (0x7E57445B): return "player.CIV_ADJECTIVE_LOC_KEY";
         (0x5E7A6BC5): return "player.CIV_FULLNAME_LOC_KEY";
         (0x21066932): return "player.CIV_NAME_LOC_KEY";
@@ -64,8 +69,20 @@ fn format_marker(u32 m) {
         (0xAA605FBD): return "player.LEADER_COLLECTION_2";
         (0x376E0D50): return "player.LEADER_POOL";
         (0x28835FD4): return "player.PLAYER_TYPE";        // 3 = Human, 1 = AI
+        (0xF4F061B8): return "player.SLOT_0";              // group3 ChunkArray's own marker = fixed slot table (SLOT_0..11), not a field
+        (0x83F7512E): return "player.SLOT_1";
+        (0x1AFE0094): return "player.SLOT_2";
+        (0x6DF93002): return "player.SLOT_3";
+        (0xF39DA5A1): return "player.SLOT_4";
+        (0x849A9537): return "player.SLOT_5";
+        (0x1D93C48D): return "player.SLOT_6";
+        (0x6A94F41B): return "player.SLOT_7";
+        (0xFA2BE98A): return "player.SLOT_8";
+        (0x8D2CD91C): return "player.SLOT_9";
+        (0xFA8CCA32): return "player.SLOT_10";
+        (0x8D8BFAA4): return "player.SLOT_11";
+        (0x9B2DF6DE): return "player.TEAM_ID";             // collides between teammates; use the SLOT_n record marker to address a specific player
         (0x48C3A20B): return "player.unknown_0ba2c348";
-        (0x296EED0E): return "player.unknown_0eed6e29";   // city-state per-turn flag
         (0x6CFE5320): return "player.unknown_2053fe6c";
         (0xC5F1092C): return "player.unknown_2c09f1c5";
         (0x940E4331): return "player.unknown_31430e94";
@@ -80,7 +97,6 @@ fn format_marker(u32 m) {
         (0xD9BAAFB2): return "player.unknown_b2afbad9";
         (0x4FBC7ECE): return "player.unknown_ce7ebc4f";
         (0xD47E92DB): return "player.unknown_db927ed4";
-        (0x9B2DF6DE): return "player.unknown_def62d9b";
         (0x35CC85E3): return "player.unknown_e385cc35";
         (0x65598AEE): return "player.unknown_ee8a5965";
         (0xE9C15FFD): return "player.unknown_fd5fc1e9";
@@ -94,6 +110,7 @@ fn format_marker(u32 m) {
         (0xEFCA224E): return "unknown_4e22caef";
         (0x7C546F81): return "unknown_816f547c";
         (0xB40DDBAE): return "unknown_aedb0db4";
+        (0x6AF361AF): return "unknown_af61f36a";           // in GAME_SESSION_RECORD; 12-byte [1][1][x], per-save counter (NOT current-player — disproven)
         (0x88305EBB): return "unknown_array_bb5e3088";
         (0x5374EDB0): return "unknown_b0ed7453";
         (0xDFDD68B5): return "unknown_b568dddf";
@@ -115,7 +132,9 @@ struct chunk_body {
 
     if (type == 1) {
         // 12 bytes of flags (e.g. PLAYER_TYPE lives in a type-8 number, but
-        // several per-player bools/flags use this 3x u32 form)
+        // several per-player bools/flags use this 3x u32 form). ALIVE_FLAGS'
+        // 3rd word is 1=alive, 0=defeated (confirmed via a same-game turn diff
+        // where a defeated player's 3rd word was the only group3 change).
         u32 unknown[3];
     }
 

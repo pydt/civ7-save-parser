@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { parse, decompress, writeCompressedData, setPlayerType, PlayerType } from '../src/index';
 import { join } from 'path';
 
@@ -168,6 +168,37 @@ describe('Parsing', () => {
     expect(after.players.find(p => p.id === 1)?.isHuman).toBe(true);
 
     expect(() => setPlayerType(data, 99, PlayerType.AI)).toThrow();
+  });
+
+  it('detects a defeated player via the alive flag', () => {
+    // alive_valamas (turn 51) and dead_valamas (turn 52) are consecutive turns
+    // of the same game; Ibn Battuta (slot 2) was defeated between them.
+    const before = parse(readFileSync(join(__dirname, './alive_valamas.Civ7Save')));
+    const after = parse(readFileSync(join(__dirname, './dead_valamas.Civ7Save')));
+
+    expect(before.players.every(p => p.isAlive)).toBe(true);
+
+    const ibnBefore = before.players.find(p => p.leader.value === 'LEADER_IBN_BATTUTA');
+    const ibnAfter = after.players.find(p => p.leader.value === 'LEADER_IBN_BATTUTA');
+    expect(ibnBefore?.isAlive).toBe(true);
+    expect(ibnAfter?.isAlive).toBe(false);
+
+    // everyone else is still alive
+    expect(
+      after.players.filter(p => p.leader.value !== 'LEADER_IBN_BATTUTA').every(p => p.isAlive)
+    ).toBe(true);
+  });
+
+  it('has every player alive in every save except dead_valamas', () => {
+    const saveFiles = readdirSync(__dirname).filter(
+      f => f.endsWith('.Civ7Save') && f !== 'dead_valamas.Civ7Save'
+    );
+    expect(saveFiles.length).toBeGreaterThan(0);
+
+    for (const file of saveFiles) {
+      const result = parse(readFileSync(join(__dirname, file)));
+      expect(result.players.every(p => p.isAlive)).toBe(true);
+    }
   });
 
   it('distinguishes teammates by slot id even though they share a team id', () => {
