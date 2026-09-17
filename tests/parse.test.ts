@@ -189,9 +189,9 @@ describe('Parsing', () => {
     ).toBe(true);
   });
 
-  it('has every player alive in every save except dead_valamas', () => {
+  it('has every player alive in every save except dead_valamas and RizalAnt59', () => {
     const saveFiles = readdirSync(__dirname).filter(
-      f => f.endsWith('.Civ7Save') && f !== 'dead_valamas.Civ7Save'
+      f => f.endsWith('.Civ7Save') && f !== 'dead_valamas.Civ7Save' && f !== 'RizalAnt59.Civ7Save'
     );
     expect(saveFiles.length).toBeGreaterThan(0);
 
@@ -219,6 +219,19 @@ describe('Parsing', () => {
     const teach = result.players.find(p => p.leader.value === 'LEADER_EDWARD_TEACH');
     expect(ashoka?.teamId).toBe(teach?.teamId); // teammates share a team id
     expect(ashoka?.id).not.toBe(teach?.id); // but never a slot id
+  });
+
+  it('excludes city-states from players (RizalAnt59 has one alongside 8 real civs)', () => {
+    // City-state group3 records carry their own LEADER_NAME/CIV_NAME
+    // (LEADER_MINOR_CIV_DEFAULT / CIVILIZATION_PLACEHOLDER_CITYSTATE), but their
+    // marker isn't in PLAYER_SLOT_MARKERS, so without the slot check they get
+    // counted as a 9th player.
+    const result = parse(readFileSync(join(__dirname, './RizalAnt59.Civ7Save')));
+    expect(result.players.length).toBe(8);
+    expect(result.players.some(p => p.civ.value === 'CIVILIZATION_PLACEHOLDER_CITYSTATE')).toBe(
+      false
+    );
+    expect(result.players.every(p => p.id !== undefined)).toBe(true);
   });
 
   it('flips only the targeted teammate to AI, not their whole team', () => {

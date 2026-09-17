@@ -316,14 +316,19 @@ export const parseChunks = (data: RawChunkData) => {
         const team = x.value.find(y => y.marker.equals(GAME_DATA_MARKERS.TEAM_ID));
         const aliveFlags = x.value.find(y => y.marker.equals(GAME_DATA_MARKERS.ALIVE_FLAGS));
 
-        if (leader && civ) {
-          // `id` is the player's fixed slot number (see PLAYER_SLOT_MARKERS) —
-          // unique per player, stable across saves, and what setPlayerType()
-          // expects. `teamId` groups players (e.g. tests/teams_*.Civ7Save has
-          // 4 teams of 2); in FFA games teamId happens to equal `id` since
-          // each player is their own team. Whose turn it is (localPlayerID)
-          // is NOT in the uncompressed data — see REVERSING.md.
-          const id = getSlotIndex(x.marker);
+        // `id` is the player's fixed slot number (see PLAYER_SLOT_MARKERS) — unique
+        // per player, stable across saves, and what setPlayerType() expects.
+        // Records whose marker isn't a known player slot are city-states (they
+        // carry their own LEADER_NAME/CIV_NAME — LEADER_MINOR_CIV_DEFAULT /
+        // CIVILIZATION_PLACEHOLDER_CITYSTATE — so without this check they get
+        // mistaken for an extra player; see tests/RizalAnt59.Civ7Save).
+        const id = getSlotIndex(x.marker);
+
+        if (leader && civ && id !== undefined) {
+          // `teamId` groups players (e.g. tests/teams_*.Civ7Save has 4 teams
+          // of 2); in FFA games teamId happens to equal `id` since each
+          // player is their own team. Whose turn it is (localPlayerID) is
+          // NOT in the uncompressed data — see REVERSING.md.
           const teamId = typeof team?.value === 'number' ? team.value : undefined;
           return [
             {
