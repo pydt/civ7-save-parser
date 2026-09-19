@@ -109,6 +109,17 @@ export const GAME_DATA_MARKERS = {
   GAME_AGE: Buffer.from([0x84, 0x84, 0xc6, 0xd0]),
   LEADER_NAME: Buffer.from([0x0f, 0xfb, 0x8c, 0xc1]),
   CIV_NAME: Buffer.from([0x76, 0x97, 0x40, 0xde]),
+  // Whether a group3 record is a real player ("CIVILIZATION_LEVEL_FULL_CIV") or
+  // a non-player slot. Non-player slots still carry their own LEADER_NAME/CIV_NAME
+  // and — critically — CAN occupy a marker from PLAYER_SLOT_MARKERS (a slot alone
+  // doesn't imply a real player), so this is the only reliable way to tell them
+  // apart. Known non-player values: "CIVILIZATION_LEVEL_CITY_STATE" (city-states,
+  // e.g. tests/RizalAnt59.Civ7Save) and "CIVILIZATION_LEVEL_INDEPENDENT"
+  // (Independent Powers filling unused slots in a small game, e.g.
+  // tests/000005.Civ7Save — a 6-player game whose remaining 6 confirmed slots are
+  // all Independent). Filter with an allowlist (=== FULL_CIV), not a blocklist,
+  // since more non-player levels may exist that we haven't seen yet.
+  CIV_LEVEL: Buffer.from([0x7a, 0x9c, 0xa0, 0x19]),
   // Per-player actor type. Civ6 called this ACTOR_AI_HUMAN (marker 95b942ce);
   // Civ7 renamed the marker but kept the value encoding: 3 = Human, 1 = AI.
   PLAYER_TYPE: Buffer.from([0xd4, 0x5f, 0x83, 0x28]),
@@ -143,7 +154,11 @@ export const GAME_DATA_MARKERS = {
  * Unlike TEAM_ID, a slot is never shared between players, so it's the right
  * identifier to address a specific player (e.g. for setPlayerType). We've only
  * confirmed the 12 slots that have held a full civ in our sample saves (up to
- * 12 players); the remainder of the underlying table is city-state-only slots.
+ * 12 players). NOTE: a slot from this table is necessary but NOT sufficient to
+ * identify a real player — in games with fewer than 12 players, the unused
+ * slots (still markers from this same table) are occupied by Independent Powers
+ * rather than being absent. Always gate on CIV_LEVEL, not slot membership alone
+ * (see tests/000005.Civ7Save).
  */
 export const PLAYER_SLOT_MARKERS = [
   Buffer.from([0xb8, 0x61, 0xf0, 0xf4]), // slot 0
@@ -315,20 +330,19 @@ export const parseChunks = (data: RawChunkData) => {
         const playerType = x.value.find(y => y.marker.equals(GAME_DATA_MARKERS.PLAYER_TYPE));
         const team = x.value.find(y => y.marker.equals(GAME_DATA_MARKERS.TEAM_ID));
         const aliveFlags = x.value.find(y => y.marker.equals(GAME_DATA_MARKERS.ALIVE_FLAGS));
+        const civLevel = x.value.find(y => y.marker.equals(GAME_DATA_MARKERS.CIV_LEVEL));
 
-        // `id` is the player's fixed slot number (see PLAYER_SLOT_MARKERS) — unique
-        // per player, stable across saves, and what setPlayerType() expects.
-        // Records whose marker isn't a known player slot are city-states (they
-        // carry their own LEADER_NAME/CIV_NAME — LEADER_MINOR_CIV_DEFAULT /
-        // CIVILIZATION_PLACEHOLDER_CITYSTATE — so without this check they get
-        // mistaken for an extra player; see tests/RizalAnt59.Civ7Save).
-        const id = getSlotIndex(x.marker);
-
-        if (leader && civ && id !== undefined) {
-          // `teamId` groups players (e.g. tests/teams_*.Civ7Save has 4 teams
-          // of 2); in FFA games teamId happens to equal `id` since each
-          // player is their own team. Whose turn it is (localPlayerID) is
-          // NOT in the uncompressed data — see REVERSING.md.
+        // A slot marker alone doesn't mean "real player" — city-states and
+        // Independent Powers can occupy PLAYER_SLOT_MARKERS entries too (see the
+        // CIV_LEVEL doc comment), so gate on CIV_LEVEL being a full civ.
+        if (leader && civ && civLevel?.value === 'CIVILIZATION_LEVEL_FULL_CIV') {
+          // `id` is the player's fixed slot number (see PLAYER_SLOT_MARKERS) —
+          // unique per player, stable across saves, and what setPlayerType()
+          // expects. `teamId` groups players (e.g. tests/teams_*.Civ7Save has
+          // 4 teams of 2); in FFA games teamId happens to equal `id` since
+          // each player is their own team. Whose turn it is (localPlayerID)
+          // is NOT in the uncompressed data — see REVERSING.md.
+          const id = getSlotIndex(x.marker);
           const teamId = typeof team?.value === 'number' ? team.value : undefined;
           return [
             {

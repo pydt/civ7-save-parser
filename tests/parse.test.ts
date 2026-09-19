@@ -223,14 +223,28 @@ describe('Parsing', () => {
 
   it('excludes city-states from players (RizalAnt59 has one alongside 8 real civs)', () => {
     // City-state group3 records carry their own LEADER_NAME/CIV_NAME
-    // (LEADER_MINOR_CIV_DEFAULT / CIVILIZATION_PLACEHOLDER_CITYSTATE), but their
-    // marker isn't in PLAYER_SLOT_MARKERS, so without the slot check they get
-    // counted as a 9th player.
+    // (LEADER_MINOR_CIV_DEFAULT / CIVILIZATION_PLACEHOLDER_CITYSTATE) and
+    // CIV_LEVEL "CIVILIZATION_LEVEL_CITY_STATE", so without the CIV_LEVEL check
+    // they get counted as a 9th player.
     const result = parse(readFileSync(join(__dirname, './RizalAnt59.Civ7Save')));
     expect(result.players.length).toBe(8);
     expect(result.players.some(p => p.civ.value === 'CIVILIZATION_PLACEHOLDER_CITYSTATE')).toBe(
       false
     );
+    expect(result.players.every(p => p.id !== undefined)).toBe(true);
+  });
+
+  it('excludes Independent Powers from players (000005 is a 6-player game with 6 Independent slots)', () => {
+    // In games with fewer than 12 players, the unused PLAYER_SLOT_MARKERS slots
+    // aren't absent from group3 — they're filled by Independent Powers
+    // (LEADER_INDEPENDENT / CIVILIZATION_INDEPENDENT, CIV_LEVEL
+    // "CIVILIZATION_LEVEL_INDEPENDENT"). A slot-membership check alone can't
+    // exclude them since they occupy real slots; only the CIV_LEVEL check can.
+    // This is what caused PYDT's "Invalid number of civs" error (actual 12,
+    // expected 6) before the CIV_LEVEL check was restored.
+    const result = parse(readFileSync(join(__dirname, './000005.Civ7Save')));
+    expect(result.players.length).toBe(6);
+    expect(result.players.some(p => p.civ.value === 'CIVILIZATION_INDEPENDENT')).toBe(false);
     expect(result.players.every(p => p.id !== undefined)).toBe(true);
   });
 
